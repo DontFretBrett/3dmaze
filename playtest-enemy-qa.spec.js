@@ -68,7 +68,7 @@ const LEVEL_SCENARIOS = [
   },
   {
     id: 4,
-    title: "Lockdown Labyrinth",
+    title: "Prism Spire",
     catchRoute: [
       "right",
       "right",

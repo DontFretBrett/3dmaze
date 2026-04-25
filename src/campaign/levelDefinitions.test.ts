@@ -7,11 +7,12 @@ import {
   LEVEL_2,
   LEVEL_3,
   LEVEL_4,
+  LEVEL_10,
 } from "./levelDefinitions";
 
 describe("campaign level definitions", () => {
-  it("ships four authored levels with level 1 active by default", () => {
-    expect(CAMPAIGN_LEVEL_DEFINITIONS).toHaveLength(4);
+  it("ships ten authored levels with level 1 active by default", () => {
+    expect(CAMPAIGN_LEVEL_DEFINITIONS).toHaveLength(10);
     expect(ACTIVE_LEVEL).toBe(LEVEL_1);
   });
 
@@ -20,6 +21,7 @@ describe("campaign level definitions", () => {
     expect("maze" in LEVEL_2).toBe(true);
     expect("layers" in LEVEL_3).toBe(true);
     expect("layers" in LEVEL_4).toBe(true);
+    expect("layers" in LEVEL_10).toBe(true);
   });
 
   it("parses layered authored levels into runtime levels with traversal tiles", () => {

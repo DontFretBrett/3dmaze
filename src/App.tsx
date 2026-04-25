@@ -331,7 +331,7 @@ export function App() {
             </p>
             <p className="campaign-status">
               {nextLevelId === null
-                ? "All four authored levels are now available from the level picker."
+                ? "All ten authored levels are now available from the level picker."
                 : `Level ${nextLevelId} is ready when you are.`}
             </p>
             <div className="victory-actions">

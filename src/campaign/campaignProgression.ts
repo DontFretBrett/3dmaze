@@ -4,7 +4,7 @@
  * uses a normalized legacy floor while vertical maps remain gated by campaign progression.
  */
 
-export type CampaignLevelId = 1 | 2 | 3 | 4;
+export type CampaignLevelId = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
 
 /** When a mechanic first appears relative to the critical path (tutorial pacing). */
 export type IntroductionTiming = "none" | "after_first_goal" | "mid_level" | "from_start";
@@ -169,6 +169,168 @@ export const CAMPAIGN_LEVELS = [
       "Difficulty knobs: enemy speed, patrol period, chase radius",
       "Optional: keyed doors / one-way edges",
     ],
+  },
+  {
+    id: 5,
+    title: "Orbital Shell",
+    band: "expert",
+    gridSpan: { width: 13, depth: 13 },
+    ladders: {
+      enabled: true,
+      introduction: "from_start",
+      rationale: "Nested circular rings use vertical transfer points like orbital elevators.",
+    },
+    holes: {
+      enabled: true,
+      introduction: "mid_level",
+      rationale: "One-way drops punish rushing across the shell and teach safer outer-ring routing.",
+    },
+    pathing: {
+      branching: "dense_branching",
+      deadEnds: "misleading_corridors",
+      pathInflationHint: "~1.8× Manhattan equivalent; rings create multiple apparent orbits.",
+    },
+    enemies: {
+      enabled: true,
+      archetype: "junction_sentinel",
+      rationale: "A mid-shell patrol watches the inner ring while the player searches for clean transfer timing.",
+    },
+    architecturePrereqs: ["Stable multi-floor traversal", "Readable traversal markers", "Enemy patrol telegraphing"],
+  },
+  {
+    id: 6,
+    title: "Gravity Cube",
+    band: "expert",
+    gridSpan: { width: 13, depth: 13 },
+    ladders: {
+      enabled: true,
+      introduction: "from_start",
+      rationale: "Corner and center ladders imply moving across cube faces within the current stacked-grid engine.",
+    },
+    holes: {
+      enabled: true,
+      introduction: "mid_level",
+      rationale: "Side-face drops create one-way shortcuts that are useful only from the right layer.",
+    },
+    pathing: {
+      branching: "dense_branching",
+      deadEnds: "misleading_corridors",
+      pathInflationHint: "~1.9× Manhattan equivalent; face-like quadrants require cross-axis planning.",
+    },
+    enemies: {
+      enabled: true,
+      archetype: "junction_sentinel",
+      rationale: "The patrol slices across a central face, forcing timed crossings.",
+    },
+    architecturePrereqs: ["Four-layer rendering readability", "Enemy speed tuning", "Restart reliability"],
+  },
+  {
+    id: 7,
+    title: "Helix Ramp",
+    band: "expert",
+    gridSpan: { width: 13, depth: 13 },
+    ladders: {
+      enabled: true,
+      introduction: "from_start",
+      rationale: "Long switchbacks simulate a ramp coil while ladders change which coil level is active.",
+    },
+    holes: {
+      enabled: true,
+      introduction: "from_start",
+      rationale: "Drops cut across the helix but can put the player behind the patrol cycle.",
+    },
+    pathing: {
+      branching: "linear_corridor",
+      deadEnds: "short_blind_alleys",
+      pathInflationHint: "~2.5× Manhattan equivalent; the route is long and timing-heavy.",
+    },
+    enemies: {
+      enabled: true,
+      archetype: "slow_patrol_fixed_loop",
+      rationale: "A fast lane patrol makes the helix feel like a moving hazard puzzle.",
+    },
+    architecturePrereqs: ["Long-route pacing", "Enemy collision polish", "Layer cue readability"],
+  },
+  {
+    id: 8,
+    title: "Pyramid Fold",
+    band: "expert",
+    gridSpan: { width: 13, depth: 13 },
+    ladders: {
+      enabled: true,
+      introduction: "from_start",
+      rationale: "Triangular floor silhouettes create a pyramid-like folded route.",
+    },
+    holes: {
+      enabled: true,
+      introduction: "mid_level",
+      rationale: "Centered drops let the player descend through the pyramid when the upper route is blocked.",
+    },
+    pathing: {
+      branching: "dense_branching",
+      deadEnds: "misleading_corridors",
+      pathInflationHint: "~2.0× Manhattan equivalent; broad base options narrow toward the apex.",
+    },
+    enemies: {
+      enabled: true,
+      archetype: "junction_sentinel",
+      rationale: "The sentinel controls the central fold and makes direct crossings risky.",
+    },
+    architecturePrereqs: ["Non-rectangular silhouettes", "Layered hazard validation", "Patrol readability"],
+  },
+  {
+    id: 9,
+    title: "Mirror Vault",
+    band: "expert",
+    gridSpan: { width: 13, depth: 13 },
+    ladders: {
+      enabled: true,
+      introduction: "from_start",
+      rationale: "Symmetric vault wings force players to reason about mirrored routes across five floors.",
+    },
+    holes: {
+      enabled: true,
+      introduction: "from_start",
+      rationale: "Mirror drops create tempting shortcuts that must be checked against the active floor.",
+    },
+    pathing: {
+      branching: "dense_branching",
+      deadEnds: "misleading_corridors",
+      pathInflationHint: "~2.1× Manhattan equivalent; mirrored branches conceal the safe ascent.",
+    },
+    enemies: {
+      enabled: true,
+      archetype: "local_chase_radius",
+      rationale: "A vertical-wing patrol threatens one side of the vault and rewards choosing the other.",
+    },
+    architecturePrereqs: ["Five-layer performance", "Patrol speed knobs", "Strong floor stack UI"],
+  },
+  {
+    id: 10,
+    title: "Astral Nexus",
+    band: "expert",
+    gridSpan: { width: 13, depth: 13 },
+    ladders: {
+      enabled: true,
+      introduction: "from_start",
+      rationale: "A central nexus and corner elevators create the final multi-floor routing exam.",
+    },
+    holes: {
+      enabled: true,
+      introduction: "from_start",
+      rationale: "Four drops around the nexus make route choice reversible only with the right ladder plan.",
+    },
+    pathing: {
+      branching: "dense_branching",
+      deadEnds: "misleading_corridors",
+      pathInflationHint: "~2.25× Manhattan equivalent; final route combines corner, center, and drop logic.",
+    },
+    enemies: {
+      enabled: true,
+      archetype: "local_chase_radius",
+      rationale: "The final patrol guards the core lane, forcing precise route and timing decisions.",
+    },
+    architecturePrereqs: ["All traversal systems", "Late-game enemy pressure", "Validated complete campaign"],
   },
 ] as const satisfies readonly CampaignLevelSpec[];
 

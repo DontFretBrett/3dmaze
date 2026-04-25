@@ -4,6 +4,7 @@ import {
   DEFAULT_CAMPAIGN_LEVEL_ID,
   getCampaignLevel,
   getNextCampaignLevelId,
+  type CampaignLevelId,
 } from "./campaignProgression";
 import { CAMPAIGN_LEVEL_DEFINITIONS, LEVEL_3, LEVEL_4 } from "./levelDefinitions";
 import {
@@ -183,7 +184,7 @@ describe("campaign validation", () => {
     const authoredEnemyPresence = CAMPAIGN_LEVEL_DEFINITIONS.map((definition) =>
       Boolean(createRuntimeLevel(definition).enemy),
     );
-    expect(authoredEnemyPresence).toEqual([false, false, true, true]);
+    expect(authoredEnemyPresence).toEqual([false, false, true, true, true, true, true, true, true, true]);
   });
 
   it("keeps authored enemy patrols reachable without occupying long shortest-path chokes", () => {
@@ -242,19 +243,19 @@ describe("campaign validation", () => {
   it("can traverse the full campaign sequence without missing references", () => {
     const visitedLevelIds: number[] = [];
     const seen = new Set<number>();
-    let currentLevelId: number | null = DEFAULT_CAMPAIGN_LEVEL_ID;
+    let currentLevelId: CampaignLevelId | null = DEFAULT_CAMPAIGN_LEVEL_ID;
 
     while (currentLevelId !== null) {
       expect(seen.has(currentLevelId)).toBe(false);
       seen.add(currentLevelId);
       visitedLevelIds.push(currentLevelId);
 
-      const campaignLevel = getCampaignLevel(currentLevelId as 1 | 2 | 3 | 4);
+      const campaignLevel = getCampaignLevel(currentLevelId);
       const authoredLevel = CAMPAIGN_LEVEL_DEFINITIONS[currentLevelId - 1];
       expect(authoredLevel).toBeDefined();
       expect(createRuntimeLevel(authoredLevel).title).toBe(campaignLevel.title);
 
-      const nextLevelId = getNextCampaignLevelId(currentLevelId as 1 | 2 | 3 | 4);
+      const nextLevelId = getNextCampaignLevelId(currentLevelId);
       if (nextLevelId !== null) {
         expect(CAMPAIGN_LEVEL_DEFINITIONS[nextLevelId - 1]).toBeDefined();
         expect(getCampaignLevel(nextLevelId).id).toBe(nextLevelId);

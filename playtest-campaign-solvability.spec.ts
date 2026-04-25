@@ -76,7 +76,7 @@ async function selectLevel(page: Page, levelId: number, title: string) {
   await expectLevelReady(page, levelId, title);
 }
 
-test("plays through all four authored levels and records campaign solvability evidence", async ({ page }) => {
+test("plays through all authored levels and records campaign solvability evidence", async ({ page }) => {
   mkdirSync("test-results", { recursive: true });
 
   const consoleErrors: string[] = [];
