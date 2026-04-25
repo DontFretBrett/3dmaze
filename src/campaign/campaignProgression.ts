@@ -82,7 +82,7 @@ export const CAMPAIGN_LEVELS = [
   },
   {
     id: 2,
-    title: "Forked Grid",
+    title: "Switchback Grid",
     band: "moderate",
     gridSpan: { width: 11, depth: 11 },
     ladders: {
@@ -96,9 +96,9 @@ export const CAMPAIGN_LEVELS = [
       rationale: "Optional sprint stretch: floor tint only (no fall damage) if timeboxed.",
     },
     pathing: {
-      branching: "branching",
-      deadEnds: "short_blind_alleys",
-      pathInflationHint: "~1.2–1.45× Manhattan; at least two plausible routes, one optimal.",
+      branching: "linear_corridor",
+      deadEnds: "none",
+      pathInflationHint: "~2.5× Manhattan; long switchbacks teach route reading before verticality.",
     },
     enemies: {
       enabled: false,

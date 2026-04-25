@@ -22,7 +22,7 @@ describe("campaign progression", () => {
   it("keeps metadata aligned with the authored campaign order", () => {
     expect(CAMPAIGN_LEVEL_IDS.map((id) => getCampaignLevel(id).title)).toEqual([
       "Neon Run",
-      "Forked Grid",
+      "Switchback Grid",
       "Vertical Drift",
       "Prism Spire",
     ]);
