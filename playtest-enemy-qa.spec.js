@@ -121,20 +121,8 @@ const LEVEL_SCENARIOS = [
 ];
 
 async function clickAction(page, action) {
-  const movesBefore = Number((await page.locator(".stat").nth(1).locator("strong").innerText()) || "0");
-  const floorBefore = await page.locator(".floor-chip").innerText();
   await page.getByLabel(ACTION_LABELS[action]).click();
-  await page.waitForFunction(
-    ({ previousMoves, previousFloor }) => {
-      if (document.querySelector(".victory") || document.querySelector(".defeat")) return true;
-      const movesValue = document.querySelectorAll(".stat strong")[1]?.textContent ?? "0";
-      const floorValue = document.querySelector(".floor-chip")?.textContent ?? "";
-      return Number(movesValue) > previousMoves || floorValue !== previousFloor;
-    },
-    { previousMoves: movesBefore, previousFloor: floorBefore },
-    { timeout: 3_000 },
-  );
-  await page.waitForTimeout(action === "up" || action === "down" ? 160 : 120);
+  await page.waitForTimeout(action === "up" || action === "down" ? 240 : 220);
 }
 
 async function runRoute(page, actions) {

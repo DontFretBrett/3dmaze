@@ -11,7 +11,7 @@
     "test": "vitest run",
     "test:e2e": "playwright test playtest-smoke.spec.js",
     "qa:campaign:static": "tsx scripts/qa-campaign-audit.ts",
-    "qa:campaign": "npm run qa:campaign:static && playwright test playtest-campaign-solvability.spec.ts",
+    "qa:campaign": "playwright test playtest-campaign-solvability.spec.ts && npm run qa:campaign:static",
     "qa:enemy:static": "tsx scripts/qa-enemy-audit.ts",
     "qa:enemy": "npm run qa:enemy:static && playwright test playtest-enemy-qa.spec.js",
     "bench": "tsx scripts/bench-enemy-perf.ts"
