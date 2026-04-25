@@ -439,19 +439,75 @@ export function MazeGame({ level = ACTIVE_LEVEL, onReady, onSnapshot }: MazeGame
     scene.add(playerRig);
 
     const enemyRig = new THREE.Group();
-    const enemy = new THREE.Mesh(
-      new THREE.OctahedronGeometry(0.82, 0),
-      new THREE.MeshStandardMaterial({
-        color: "#ff6b5a",
-        emissive: "#c02818",
-        emissiveIntensity: 0.85,
-        roughness: 0.35,
-        metalness: 0.4,
-      }),
-    );
-    enemy.position.y = enemyBaseHeight;
+    const enemyBody = new THREE.Group();
+    const enemyCoreMaterial = new THREE.MeshStandardMaterial({
+      color: "#321016",
+      emissive: "#ff1d2f",
+      emissiveIntensity: 1.75,
+      roughness: 0.22,
+      metalness: 0.7,
+    });
+    const enemySpineMaterial = new THREE.MeshStandardMaterial({
+      color: "#ffb1a5",
+      emissive: "#ff2639",
+      emissiveIntensity: 1.15,
+      roughness: 0.28,
+      metalness: 0.58,
+    });
+    const enemyEyeMaterial = new THREE.MeshBasicMaterial({ color: "#fff0bb" });
+    const enemy = new THREE.Mesh(new THREE.OctahedronGeometry(0.86, 0), enemyCoreMaterial);
     enemy.castShadow = true;
-    enemyRig.add(enemy);
+    enemyBody.add(enemy);
+
+    const enemyEye = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.1, 0.06), enemyEyeMaterial);
+    enemyEye.position.set(0, 0.12, -0.74);
+    enemyBody.add(enemyEye);
+
+    const spineGeometry = new THREE.ConeGeometry(0.16, 0.72, 4);
+    [
+      { position: new THREE.Vector3(0, 0.88, 0), rotation: new THREE.Euler(0, 0, Math.PI) },
+      { position: new THREE.Vector3(0.82, 0, 0), rotation: new THREE.Euler(0, 0, -Math.PI / 2) },
+      { position: new THREE.Vector3(-0.82, 0, 0), rotation: new THREE.Euler(0, 0, Math.PI / 2) },
+      { position: new THREE.Vector3(0, 0, 0.82), rotation: new THREE.Euler(Math.PI / 2, 0, 0) },
+      { position: new THREE.Vector3(0, 0, -0.82), rotation: new THREE.Euler(-Math.PI / 2, 0, 0) },
+    ].forEach(({ position, rotation }) => {
+      const spine = new THREE.Mesh(spineGeometry, enemySpineMaterial);
+      spine.position.copy(position);
+      spine.rotation.copy(rotation);
+      spine.castShadow = true;
+      enemyBody.add(spine);
+    });
+
+    const enemyWarningMaterial = new THREE.MeshBasicMaterial({
+      color: "#ff2639",
+      transparent: true,
+      opacity: 0.5,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const enemyWarningRing = new THREE.Mesh(new THREE.RingGeometry(1.1, 1.72, 48), enemyWarningMaterial);
+    enemyWarningRing.rotation.x = -Math.PI / 2;
+    enemyWarningRing.position.y = 0.08;
+    enemyRig.add(enemyWarningRing);
+
+    const enemySearchMaterial = new THREE.MeshBasicMaterial({
+      color: "#ff2639",
+      transparent: true,
+      opacity: 0.16,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const enemySearchCone = new THREE.Mesh(new THREE.ConeGeometry(1.05, 2.8, 32, 1, true), enemySearchMaterial);
+    enemySearchCone.rotation.x = Math.PI / 2;
+    enemySearchCone.position.set(0, 0.56, -1.62);
+    enemyBody.add(enemySearchCone);
+
+    const enemyLight = new THREE.PointLight("#ff2639", 2.8, 9);
+    enemyLight.position.y = enemyBaseHeight + 0.35;
+    enemyRig.add(enemyLight);
+
+    enemyBody.position.y = enemyBaseHeight;
+    enemyRig.add(enemyBody);
     enemyRig.visible = enemyFeatureEnabled && !!enemyState;
     if (enemyState) {
       enemyRig.position.copy(gridToWorld(runtimeLevel, enemyState.cell));
@@ -598,7 +654,8 @@ export function MazeGame({ level = ACTIVE_LEVEL, onReady, onSnapshot }: MazeGame
       if (!enemyState) return;
 
       enemyRig.position.copy(gridToWorld(runtimeLevel, enemyState.cell));
-      gsap.set(enemy.rotation, { x: 0, y: 0, z: 0 });
+      gsap.set(enemyBody.rotation, { x: 0, y: 0, z: 0 });
+      gsap.set(enemyBody.scale, { x: 1, y: 1, z: 1 });
     };
 
     const checkContact = () => {
@@ -653,7 +710,7 @@ export function MazeGame({ level = ACTIVE_LEVEL, onReady, onSnapshot }: MazeGame
         },
       });
 
-      gsap.to(enemy.rotation, {
+      gsap.to(enemyBody.rotation, {
         y: step.rotationRadians,
         duration: step.rotationDurationSeconds,
         ease: "power1.out",
@@ -937,7 +994,14 @@ export function MazeGame({ level = ACTIVE_LEVEL, onReady, onSnapshot }: MazeGame
       probe?.slice("playerBob");
 
       if (enemyFeatureEnabled && enemyState) {
-        enemy.position.y = enemyBaseHeight + Math.sin(now * 0.005 + 1.1) * 0.06;
+        const threatPulse = (Math.sin(now * 0.008) + 1) / 2;
+        enemyBody.position.y = enemyBaseHeight + Math.sin(now * 0.005 + 1.1) * 0.06;
+        enemyBody.rotation.z = Math.sin(now * 0.006) * 0.08;
+        enemyBody.scale.setScalar(1 + threatPulse * 0.035);
+        enemyWarningRing.scale.setScalar(1 + threatPulse * 0.2);
+        enemyWarningMaterial.opacity = 0.24 + threatPulse * 0.28;
+        enemySearchMaterial.opacity = 0.09 + threatPulse * 0.1;
+        enemyLight.intensity = 2.1 + threatPulse * 2.8;
       }
       probe?.slice("enemyBob");
 

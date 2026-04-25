@@ -73,19 +73,6 @@ export function App() {
     setSnapshot(createInitialGameSnapshot(activeLevelDefinition, getStoredBestTime(activeLevelStorageId)));
   }, [activeLevelDefinition, activeLevelStorageId]);
 
-  useEffect(() => {
-    if (!snapshot.completed || nextLevelId === null) return;
-
-    const timeoutId = window.setTimeout(() => {
-      clearControlHandlers();
-      setSelectedLevelId(nextLevelId);
-    }, 1400);
-
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [clearControlHandlers, nextLevelId, snapshot.completed]);
-
   const controlsReady = Boolean(moveHandler && restartHandler && resetViewHandler && climbUpHandler && climbDownHandler);
   const controlsLocked = snapshot.completed || snapshot.failed || !controlsReady;
 
@@ -345,7 +332,7 @@ export function App() {
             <p className="campaign-status">
               {nextLevelId === null
                 ? "All four authored levels are now available from the level picker."
-                : `Advancing to Level ${nextLevelId} automatically.`}
+                : `Level ${nextLevelId} is ready when you are.`}
             </p>
             <div className="victory-actions">
               {nextLevelId === null ? (

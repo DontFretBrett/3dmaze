@@ -141,7 +141,7 @@ export const CAMPAIGN_LEVELS = [
   },
   {
     id: 4,
-    title: "Lockdown Labyrinth",
+    title: "Prism Spire",
     band: "expert",
     gridSpan: { width: 13, depth: 13 },
     ladders: {

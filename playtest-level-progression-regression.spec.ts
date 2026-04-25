@@ -13,7 +13,6 @@ const ROTATION_SPEED = 0.008;
 const HALF_TURN_DRAG_PX = Math.round(Math.PI / ROTATION_SPEED);
 const HORIZONTAL_SETTLE_MS = Math.ceil(PLAYER_MOVE_SECONDS * 1000) + 180;
 const VERTICAL_SETTLE_MS = Math.ceil(PLAYER_MOVE_SECONDS * 1.08 * 1000) + 240;
-const AUTO_ADVANCE_SETTLE_MS = 1_900;
 
 const ACTION_LABELS: Record<CampaignAction, string> = {
   forward: "Move forward",
@@ -239,11 +238,14 @@ test("runs final level-progression regression and records release evidence", asy
       }
 
       if (nextLevel) {
-        await expect(page.locator(".campaign-status")).toContainText(`Advancing to Level ${nextLevel.id} automatically.`);
-        await page.waitForTimeout(AUTO_ADVANCE_SETTLE_MS);
+        await expect(page.locator(".campaign-status")).toContainText(`Level ${nextLevel.id} is ready when you are.`);
+        await page.waitForTimeout(1_900);
+        await expect(page.locator(".victory")).toBeVisible();
+        await expect(page.locator(".hud-level")).toContainText(`Level ${walkthrough.id}: ${walkthrough.title}`);
+        await page.getByRole("button", { name: "Next level" }).click();
         await expectLevelReady(page, nextLevel.id, nextLevel.title);
         levelReport.transition = {
-          kind: "auto-advance",
+          kind: "manual-advance",
           destination: nextLevel.id,
           state: await snapshotLevelState(page),
           screenshot: await captureScreenshot(page, `progression-level-${walkthrough.id}-to-${nextLevel.id}.png`),

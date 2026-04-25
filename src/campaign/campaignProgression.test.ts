@@ -24,7 +24,7 @@ describe("campaign progression", () => {
       "Neon Run",
       "Forked Grid",
       "Vertical Drift",
-      "Lockdown Labyrinth",
+      "Prism Spire",
     ]);
   });
 });
