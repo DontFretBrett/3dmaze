@@ -578,11 +578,16 @@ h1 {
   .hud {
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 0.75rem;
+    padding: 0.65rem;
+    max-height: 40vh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
 
   .stats {
     grid-column: 1 / -1;
     justify-content: stretch;
+    gap: 0.35rem;
   }
 
   .hud-actions {
@@ -590,7 +595,14 @@ h1 {
   }
 
   .stat {
-    flex: 1 1 5.6rem;
+    flex: 1 1 4.5rem;
+    min-width: 4.5rem;
+    min-height: 3.2rem;
+    padding: 0.45rem 0.55rem;
+  }
+
+  .stat strong {
+    font-size: 1rem;
   }
 
   .brand p {
@@ -602,7 +614,7 @@ h1 {
   }
 
   .layer-cues {
-    gap: 0.45rem;
+    display: none;
   }
 
   .floor-stack,
@@ -619,11 +631,11 @@ h1 {
   }
 
   .level-select {
-    gap: 0.35rem;
+    display: none;
   }
 
-  .level-chip {
-    flex: 1 1 8rem;
+  .brand .hud-level {
+    display: none;
   }
 
   .brand-mark {
