@@ -1,0 +1,5 @@
+{
+  "movesAfterDefaultArrowUp": 0,
+  "movesAfterRotatedArrowUp": 0,
+  "note": "If camera-relative Up works, grid direction of first Up may differ vs after drag; both should increment moves if walk succeeded."
+}

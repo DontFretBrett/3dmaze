@@ -1,0 +1,55 @@
+3D Maze — Rotated controls QA evidence (automated + manual follow-up)
+Date: 2026-04-24
+Workspace: /Users/brettstudio/Code/3dmaze
+
+Summary
+-------
+- Camera-relative movement is implemented in src/movementFromCamera.ts (yaw only).
+- src/MazeGame.tsx calls resolveIntentToGridDelta(cameraYaw, intent, "continuous").
+- Camera pitch (drag vertical, min/max pitch) affects orbit framing only; it does NOT change
+  which grid step forward/back/left/right resolve to. "View down" / birdseye does not
+  re-map controls by pitch — only yaw matters.
+
+Automated validation (executed)
+-------------------------------
+Commands:
+  cd /Users/brettstudio/Code/3dmaze && bun run test && bun run build
+
+Results:
+  vitest: 16 tests passed (src/movementFromCamera.test.ts)
+  tsc + vite build: succeeded
+
+Rotation cases covered in tests (continuous mode, MAZE_LAYOUT / START_CELL)
+- 0 rad: identity intent → grid mapping; open path to (2,1); wall blocks forward to (1,0)
+- π/2: remapped intents; open to (1,2); wall on prior forward
+- π (180° "behind" camera): forward → grid backward; specific case for intuitive flip
+- -π/2: remapped intents; collision checks
+- Default MazeGame yaw atan2(10,11): mapping still identity cardinals after quantization
+- snap90: near π/4 + 0.02 snaps to same table as π/2 snap90
+- Explicit note test: pitch is not an input to resolveIntentToGridDelta
+
+Files touched this QA pass
+--------------------------
+- src/MazeGame.tsx (restored; camera-relative moves + GameSnapshot / climb stubs for App)
+- src/levelRuntime.ts (RuntimeLevel construction typing fix for tsc)
+- src/movementFromCamera.test.ts (extra rotation / default yaw / snap90 / pitch note tests)
+- docs/qa-rotated-controls-evidence.txt (this log)
+
+Manual gameplay evidence (recommended captures — not run in CI)
+-----------------------------------------------------------------
+1) bun run dev → open local URL.
+2) For each camera yaw ~0°, 90°, 180°, 270° (orbit until the beacon appears in each quadrant):
+   - Press Up/Down/Left/Right (or HUD buttons) and confirm the cyan player moves relative
+     to the current view into open corridors only.
+3) 180° flipped view: orbit until you are "behind" the start; Up should move deeper into
+   the maze (positive Z from start in test layout), not into the north wall.
+4) View down: drag to minimum pitch (looking more top-down). Repeat step 2 — mapping should
+   match the same yaw as before; only perspective changes.
+5) Optional: record a short screen capture while rotating and pressing Up repeatedly.
+
+Known / accepted behavior
+-------------------------
+- At exactly 45° diagonals, quantizeWorldXZToCardinal tie-breaks toward depth (Z) first
+  (see movementFromCamera.ts). Slight yaw drift near diagonals can switch a single intent
+  between two cardinals; use snap90 mode in code if product wants stricter stability during
+  free orbit (currently MazeGame uses "continuous").
