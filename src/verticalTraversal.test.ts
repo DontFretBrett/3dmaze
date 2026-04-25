@@ -62,6 +62,7 @@ describe("resolveVerticalTraversal", () => {
     const level = createRuntimeLevel(def);
     expect(resolveVerticalTraversal(level, { x: 1, z: 1, layer: 0 }, 1, 0.4)).toEqual({
       destination: { x: 1, z: 1, layer: 1 },
+      seam: null,
       segments: [{ target: { x: 1, z: 1, layer: 1 }, duration: 0.43200000000000005, visualCell: { x: 1, z: 1, layer: 1 } }],
     });
   });

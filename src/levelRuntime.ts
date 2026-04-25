@@ -1,13 +1,20 @@
+import { CUBE_FACES, type CubeFace } from "./cubeTopology";
 import { DEFAULT_ENEMY_PACING, PLAYER_MOVE_SECONDS } from "./enemyDesign";
 
+export type { CubeFace } from "./cubeTopology";
+
 export type Tile = 0 | 1 | "ladder" | "hole";
+export type LevelTopology = "stack" | "cube";
 
 export type MazeLayer = readonly (readonly Tile[])[];
+export type CubeLayerDefinition = Record<CubeFace, MazeLayer>;
+export type CubeRuntimeLayer = Record<CubeFace, Tile[][]>;
 
 export interface LevelCoordinateInput {
   x: number;
   z: number;
   layer?: number;
+  face?: CubeFace;
 }
 
 export interface LegacyLevelDefinition {
@@ -28,12 +35,23 @@ export interface LayeredLevelDefinition {
   enemy?: EnemyDefinitionInput;
 }
 
-export type LevelDefinition = LegacyLevelDefinition | LayeredLevelDefinition;
+export interface CubeLevelDefinition {
+  id?: string;
+  title?: string;
+  topology: "cube";
+  cubeLayers: readonly CubeLayerDefinition[];
+  start: LevelCoordinateInput;
+  finish: LevelCoordinateInput;
+  enemy?: EnemyDefinitionInput;
+}
+
+export type LevelDefinition = LegacyLevelDefinition | LayeredLevelDefinition | CubeLevelDefinition;
 
 export interface LevelCoordinate {
   x: number;
   z: number;
   layer: number;
+  face?: CubeFace;
 }
 
 export interface EnemyDefinitionInput {
@@ -53,10 +71,13 @@ export interface EnemyRuntimeDefinition {
 export interface RuntimeLevel {
   id: string;
   title?: string;
+  topology: LevelTopology;
   layers: Tile[][][];
+  cubeLayers: CubeRuntimeLayer[];
   width: number;
   depth: number;
   layerCount: number;
+  faceCount: number;
   start: LevelCoordinate;
   finish: LevelCoordinate;
   enemy: EnemyRuntimeDefinition | null;
@@ -66,19 +87,30 @@ export interface TileProbe extends LevelCoordinate {
   tile: Tile | undefined;
 }
 
+function isCubeLevelDefinition(definition: LevelDefinition): definition is CubeLevelDefinition {
+  return "topology" in definition && definition.topology === "cube";
+}
+
 export function createRuntimeLevel(definition: LevelDefinition): RuntimeLevel {
-  const layers = normalizeLayers(definition);
-  const depth = layers[0]?.length ?? 0;
-  const width = layers[0]?.[0]?.length ?? 0;
+  const topology: LevelTopology = isCubeLevelDefinition(definition) ? "cube" : "stack";
+  const stackLayers = topology === "stack" ? normalizeStackLayers(definition as LegacyLevelDefinition | LayeredLevelDefinition) : [];
+  const cubeLayers = topology === "cube" ? normalizeCubeLayers(definition as CubeLevelDefinition) : [];
+  const width = topology === "cube" ? cubeLayers[0]!.north[0]!.length : stackLayers[0]?.[0]?.length ?? 0;
+  const depth = topology === "cube" ? cubeLayers[0]!.north.length : stackLayers[0]?.length ?? 0;
+  const layerCount = topology === "cube" ? cubeLayers.length : stackLayers.length;
+
   const runtime: RuntimeLevel = {
     id: definition.id ?? "level-1",
     title: definition.title,
-    layers,
+    topology,
+    layers: stackLayers,
+    cubeLayers,
     width,
     depth,
-    layerCount: layers.length,
-    start: { x: 0, z: 0, layer: 0 },
-    finish: { x: 0, z: 0, layer: 0 },
+    layerCount,
+    faceCount: topology === "cube" ? CUBE_FACES.length : 1,
+    start: { x: 0, z: 0, layer: 0, ...(topology === "cube" ? { face: "north" as const } : {}) },
+    finish: { x: 0, z: 0, layer: 0, ...(topology === "cube" ? { face: "north" as const } : {}) },
     enemy: null,
   };
 
@@ -89,12 +121,32 @@ export function createRuntimeLevel(definition: LevelDefinition): RuntimeLevel {
   return runtime;
 }
 
-export function getTileAt(level: RuntimeLevel, x: number, z: number, layer = 0): Tile | undefined {
+export function getTileAt(
+  level: RuntimeLevel,
+  x: number,
+  z: number,
+  layer = 0,
+  face: CubeFace | undefined = undefined,
+): Tile | undefined {
+  if (level.topology === "cube") {
+    const resolvedFace = face;
+    if (!resolvedFace) {
+      throw new Error("Cube levels require a face when probing tiles.");
+    }
+    return level.cubeLayers[layer]?.[resolvedFace]?.[z]?.[x];
+  }
+
   return level.layers[layer]?.[z]?.[x];
 }
 
-export function isWalkableTile(level: RuntimeLevel, x: number, z: number, layer = 0): boolean {
-  const tile = getTileAt(level, x, z, layer);
+export function isWalkableTile(
+  level: RuntimeLevel,
+  x: number,
+  z: number,
+  layer = 0,
+  face: CubeFace | undefined = undefined,
+): boolean {
+  const tile = getTileAt(level, x, z, layer, face);
   return tile !== undefined && tile !== 1;
 }
 
@@ -110,49 +162,49 @@ export function isStableTile(tile: Tile | undefined): boolean {
 
 /**
  * Resolves the rest position after entering `coord` when that cell (or stacked holes below it)
- * is a hole shaft: same (x, z), decreasing layer until a non-hole surface is reached.
+ * is a hole shaft: same x/z/face, decreasing layer until a non-hole surface is reached.
  * Returns null if the shaft exits the world or lands on a wall.
  */
 export function resolveHoleLanding(level: RuntimeLevel, coord: LevelCoordinate): LevelCoordinate | null {
-  let { x, z, layer } = coord;
-  while (getTileAt(level, x, z, layer) === "hole") {
+  const { x, z, face } = coord;
+  let layer = coord.layer;
+
+  while (getTileAt(level, x, z, layer, face) === "hole") {
     layer -= 1;
     if (layer < 0) return null;
   }
 
-  const surface = getTileAt(level, x, z, layer);
+  const surface = getTileAt(level, x, z, layer, face);
   if (!isStableTile(surface)) return null;
-  return { x, z, layer };
+  return face ? { x, z, layer, face } : { x, z, layer };
 }
 
 /**
  * Authoring-time checks so ladders are never decorative dead-ends and every hole has a defined landing.
- * Call after `RuntimeLevel` geometry is normalized.
+  * Call after `RuntimeLevel` geometry is normalized.
  */
 export function validateLevelTraversalSemantics(level: RuntimeLevel): void {
-  for (let layer = 0; layer < level.layerCount; layer += 1) {
-    for (let z = 0; z < level.depth; z += 1) {
-      for (let x = 0; x < level.width; x += 1) {
-        const tile = getTileAt(level, x, z, layer);
-        if (tile === "hole") {
-          const landing = resolveHoleLanding(level, { x, z, layer });
-          if (!landing) {
-            throw new Error(`Hole at (${x}, ${z}, layer ${layer}) has no safe landing below.`);
-          }
-        }
-
-        if (tile === "ladder") {
-          const above = getTileAbove(level, { x, z, layer });
-          const below = getTileBelow(level, { x, z, layer });
-          const pairedUp = above?.tile === "ladder";
-          const pairedDown = below?.tile === "ladder";
-          if (!pairedUp && !pairedDown) {
-            throw new Error(`Ladder at (${x}, ${z}, layer ${layer}) must stack with another ladder on layer ${layer + 1} or ${layer - 1}.`);
-          }
-        }
+  forEachCoordinate(level, (coord) => {
+    const tile = getTileAt(level, coord.x, coord.z, coord.layer, coord.face);
+    if (tile === "hole") {
+      const landing = resolveHoleLanding(level, coord);
+      if (!landing) {
+        throw new Error(`Hole at (${coord.x}, ${coord.z}, layer ${coord.layer}${formatFaceSuffix(coord.face)}) has no safe landing below.`);
       }
     }
-  }
+
+    if (tile === "ladder") {
+      const above = getTileAbove(level, coord);
+      const below = getTileBelow(level, coord);
+      const pairedUp = above?.tile === "ladder";
+      const pairedDown = below?.tile === "ladder";
+      if (!pairedUp && !pairedDown) {
+        throw new Error(
+          `Ladder at (${coord.x}, ${coord.z}, layer ${coord.layer}${formatFaceSuffix(coord.face)}) must stack with another ladder on layer ${coord.layer + 1} or ${coord.layer - 1}.`,
+        );
+      }
+    }
+  });
 }
 
 export function getTileAbove(level: RuntimeLevel, position: LevelCoordinate): TileProbe | null {
@@ -163,7 +215,28 @@ export function getTileBelow(level: RuntimeLevel, position: LevelCoordinate): Ti
   return probeVerticalTile(level, position, -1);
 }
 
-function normalizeLayers(definition: LevelDefinition): Tile[][][] {
+export function forEachCoordinate(level: RuntimeLevel, visitor: (coord: LevelCoordinate) => void) {
+  for (let layer = 0; layer < level.layerCount; layer += 1) {
+    if (level.topology === "cube") {
+      for (const face of CUBE_FACES) {
+        for (let z = 0; z < level.depth; z += 1) {
+          for (let x = 0; x < level.width; x += 1) {
+            visitor({ x, z, layer, face });
+          }
+        }
+      }
+      continue;
+    }
+
+    for (let z = 0; z < level.depth; z += 1) {
+      for (let x = 0; x < level.width; x += 1) {
+        visitor({ x, z, layer });
+      }
+    }
+  }
+}
+
+function normalizeStackLayers(definition: LegacyLevelDefinition | LayeredLevelDefinition): Tile[][][] {
   const sourceLayers = "layers" in definition ? definition.layers : [definition.maze];
   if (sourceLayers.length === 0) {
     throw new Error("Level must contain at least one layer.");
@@ -172,47 +245,100 @@ function normalizeLayers(definition: LevelDefinition): Tile[][][] {
   let expectedDepth = -1;
   let expectedWidth = -1;
 
-  return sourceLayers.map((layer, layerIndex) => {
-    if (layer.length === 0) {
-      throw new Error(`Layer ${layerIndex} must contain at least one row.`);
+  return sourceLayers.map((layer, layerIndex) => normalizeMazeLayer(layer, layerIndex, () => {
+    if (expectedDepth === -1) {
+      expectedDepth = layer.length;
+      expectedWidth = layer[0]!.length;
+      return;
     }
 
-    const cloned = layer.map((row, rowIndex) => {
-      if (row.length === 0) {
-        throw new Error(`Layer ${layerIndex}, row ${rowIndex} must contain at least one cell.`);
-      }
-
-      return row.map((cell, cellIndex) => {
-        if (cell !== 0 && cell !== 1 && cell !== "ladder" && cell !== "hole") {
-          throw new Error(`Unsupported tile value ${String(cell)} at layer ${layerIndex}, row ${rowIndex}, col ${cellIndex}.`);
-        }
-        return cell;
-      });
-    });
-
-    const layerDepth = cloned.length;
-    const layerWidth = cloned[0].length;
-    cloned.forEach((row, rowIndex) => {
-      if (row.length !== layerWidth) {
-        throw new Error(`Layer ${layerIndex} is not rectangular: row ${rowIndex} has width ${row.length}, expected ${layerWidth}.`);
-      }
-    });
-
-    if (expectedDepth === -1) {
-      expectedDepth = layerDepth;
-      expectedWidth = layerWidth;
-    } else if (layerDepth !== expectedDepth || layerWidth !== expectedWidth) {
+    if (layer.length !== expectedDepth || layer[0]!.length !== expectedWidth) {
       throw new Error(
-        `Layer ${layerIndex} dimensions ${layerWidth}x${layerDepth} do not match expected ${expectedWidth}x${expectedDepth}.`,
+        `Layer ${layerIndex} dimensions ${layer[0]!.length}x${layer.length} do not match expected ${expectedWidth}x${expectedDepth}.`,
       );
     }
+  }));
+}
 
-    return cloned;
+function normalizeCubeLayers(definition: CubeLevelDefinition): CubeRuntimeLayer[] {
+  if (definition.cubeLayers.length === 0) {
+    throw new Error("Cube level must contain at least one cube layer.");
+  }
+
+  let expectedDepth = -1;
+  let expectedWidth = -1;
+
+  return definition.cubeLayers.map((cubeLayer, layerIndex) => {
+    const normalized = {} as CubeRuntimeLayer;
+    for (const face of CUBE_FACES) {
+      const faceLayer = cubeLayer[face];
+      if (!faceLayer) {
+        throw new Error(`Cube layer ${layerIndex} is missing the ${face} face.`);
+      }
+
+      normalized[face] = normalizeMazeLayer(faceLayer, layerIndex, () => {
+        if (expectedDepth === -1) {
+          expectedDepth = faceLayer.length;
+          expectedWidth = faceLayer[0]!.length;
+          return;
+        }
+
+        if (faceLayer.length !== expectedDepth || faceLayer[0]!.length !== expectedWidth) {
+          throw new Error(
+            `Cube layer ${layerIndex}, face ${face} dimensions ${faceLayer[0]!.length}x${faceLayer.length} do not match expected ${expectedWidth}x${expectedDepth}.`,
+          );
+        }
+      }, face);
+    }
+
+    if (expectedWidth !== expectedDepth) {
+      throw new Error(`Cube topology requires square faces; received ${expectedWidth}x${expectedDepth}.`);
+    }
+
+    return normalized;
   });
 }
 
+function normalizeMazeLayer(
+  layer: MazeLayer,
+  layerIndex: number,
+  validateDimensions: () => void,
+  face?: CubeFace,
+): Tile[][] {
+  if (layer.length === 0) {
+    throw new Error(`Layer ${layerIndex}${formatFaceSuffix(face)} must contain at least one row.`);
+  }
+
+  const cloned = layer.map((row, rowIndex) => {
+    if (row.length === 0) {
+      throw new Error(`Layer ${layerIndex}${formatFaceSuffix(face)}, row ${rowIndex} must contain at least one cell.`);
+    }
+
+    return row.map((cell, cellIndex) => {
+      if (cell !== 0 && cell !== 1 && cell !== "ladder" && cell !== "hole") {
+        throw new Error(
+          `Unsupported tile value ${String(cell)} at layer ${layerIndex}${formatFaceSuffix(face)}, row ${rowIndex}, col ${cellIndex}.`,
+        );
+      }
+      return cell;
+    });
+  });
+
+  const layerWidth = cloned[0]!.length;
+  cloned.forEach((row, rowIndex) => {
+    if (row.length !== layerWidth) {
+      throw new Error(
+        `Layer ${layerIndex}${formatFaceSuffix(face)} is not rectangular: row ${rowIndex} has width ${row.length}, expected ${layerWidth}.`,
+      );
+    }
+  });
+
+  validateDimensions();
+  return cloned;
+}
+
 function normalizeCoordinate(
-  level: Pick<RuntimeLevel, "width" | "depth" | "layerCount"> & { layers: Tile[][][] },
+  level: Pick<RuntimeLevel, "topology" | "width" | "depth" | "layerCount" | "cubeLayers"> & { layers: Tile[][][] },
   value: LevelCoordinateInput,
   label: string,
 ): LevelCoordinate {
@@ -227,6 +353,21 @@ function normalizeCoordinate(
 
   if (value.x < 0 || value.x >= level.width || value.z < 0 || value.z >= level.depth) {
     throw new Error(`Level ${label} (${value.x}, ${value.z}, layer ${layer}) is out of bounds.`);
+  }
+
+  if (level.topology === "cube") {
+    if (!value.face || !CUBE_FACES.includes(value.face)) {
+      throw new Error(`Level ${label} must specify a valid cube face.`);
+    }
+
+    const anchorTile = getTileAt(level as RuntimeLevel, value.x, value.z, layer, value.face);
+    if (!isAnchorTile(anchorTile)) {
+      throw new Error(
+        `Level ${label} (${value.x}, ${value.z}, layer ${layer}, face ${value.face}) must be floor or ladder — holes and walls are not allowed.`,
+      );
+    }
+
+    return { x: value.x, z: value.z, layer, face: value.face };
   }
 
   const anchorTile = getTileAt(level as RuntimeLevel, value.x, value.z, layer);
@@ -261,18 +402,19 @@ function normalizeEnemy(level: RuntimeLevel, enemy: EnemyDefinitionInput | null)
   } satisfies EnemyRuntimeDefinition;
 
   normalizedPath.forEach((cell, index) => {
-    if (
-      (cell.x === level.start.x && cell.z === level.start.z && cell.layer === level.start.layer) ||
-      (cell.x === level.finish.x && cell.z === level.finish.z && cell.layer === level.finish.layer)
-    ) {
+    if (sameCoordinate(cell, level.start) || sameCoordinate(cell, level.finish)) {
       throw new Error(`Enemy waypoint ${index} cannot overlap the level start or finish.`);
     }
 
     if (index === 0) return;
 
-    const previous = normalizedPath[index - 1];
+    const previous = normalizedPath[index - 1]!;
     if (cell.layer !== previous.layer) {
       throw new Error(`Enemy waypoint ${index} cannot jump between layers.`);
+    }
+
+    if (cell.face !== previous.face) {
+      throw new Error(`Enemy waypoint ${index} cannot jump between cube faces.`);
     }
 
     const manhattanDistance = Math.abs(cell.x - previous.x) + Math.abs(cell.z - previous.z);
@@ -288,10 +430,20 @@ function probeVerticalTile(level: RuntimeLevel, position: LevelCoordinate, layer
   const nextLayer = position.layer + layerOffset;
   if (nextLayer < 0 || nextLayer >= level.layerCount) return null;
 
+  const face = level.topology === "cube" ? position.face : undefined;
   return {
     x: position.x,
     z: position.z,
     layer: nextLayer,
-    tile: getTileAt(level, position.x, position.z, nextLayer),
+    ...(face ? { face } : {}),
+    tile: getTileAt(level, position.x, position.z, nextLayer, face),
   };
+}
+
+function formatFaceSuffix(face: CubeFace | undefined) {
+  return face ? `, face ${face}` : "";
+}
+
+export function sameCoordinate(left: LevelCoordinate, right: LevelCoordinate) {
+  return left.x === right.x && left.z === right.z && left.layer === right.layer && left.face === right.face;
 }

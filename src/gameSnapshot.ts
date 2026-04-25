@@ -3,15 +3,15 @@ import { canClimbBetweenLayers } from "./verticalTraversal";
 import type { CurrentTileKind, GameSnapshot } from "./MazeGame";
 
 export function describeCurrentTile(level: RuntimeLevel, cell: LevelCoordinate): CurrentTileKind {
-  if (cell.x === level.start.x && cell.z === level.start.z && cell.layer === level.start.layer) {
+  if (cell.x === level.start.x && cell.z === level.start.z && cell.layer === level.start.layer && cell.face === level.start.face) {
     return "start";
   }
 
-  if (cell.x === level.finish.x && cell.z === level.finish.z && cell.layer === level.finish.layer) {
+  if (cell.x === level.finish.x && cell.z === level.finish.z && cell.layer === level.finish.layer && cell.face === level.finish.face) {
     return "exit";
   }
 
-  const tile = getTileAt(level, cell.x, cell.z, cell.layer);
+  const tile = getTileAt(level, cell.x, cell.z, cell.layer, cell.face);
   if (tile === "ladder") return "ladder";
   if (tile === "hole") return "hole";
   return "floor";
@@ -29,8 +29,11 @@ export function createInitialGameSnapshot(levelDefinition: LevelDefinition, best
     isStunned: false,
     layer: runtimeLevel.start.layer,
     layerCount: runtimeLevel.layerCount,
+    topology: runtimeLevel.topology,
+    face: runtimeLevel.start.face ?? null,
     currentTile: describeCurrentTile(runtimeLevel, runtimeLevel.start),
     canClimbUp: canClimbBetweenLayers(runtimeLevel, runtimeLevel.start, 1),
     canClimbDown: canClimbBetweenLayers(runtimeLevel, runtimeLevel.start, -1),
+    topologyCue: runtimeLevel.start.face ? `${runtimeLevel.start.face} face in focus.` : null,
   };
 }

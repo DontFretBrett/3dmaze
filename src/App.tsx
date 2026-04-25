@@ -10,6 +10,7 @@ import {
   Trophy,
   Zap,
 } from "lucide-react";
+import { CUBE_FACE_LABELS, getCubeFaceNeighbors } from "./cubeTopology";
 import {
   CAMPAIGN_LEVELS,
   DEFAULT_CAMPAIGN_LEVEL_ID,
@@ -145,6 +146,20 @@ export function App() {
     }
   }, [snapshot.canClimbDown, snapshot.canClimbUp, snapshot.currentTile]);
 
+  const layerLabel = snapshot.topology === "cube" ? "Tier" : "Floor";
+  const faceLabel = snapshot.face ? CUBE_FACE_LABELS[snapshot.face] : null;
+  const faceMap = useMemo(() => {
+    if (!snapshot.face) return null;
+    const neighbors = getCubeFaceNeighbors(snapshot.face);
+    return [
+      { label: "Current", value: CUBE_FACE_LABELS[snapshot.face], active: true },
+      { label: "Left seam", value: CUBE_FACE_LABELS[neighbors.left], active: false },
+      { label: "Right seam", value: CUBE_FACE_LABELS[neighbors.right], active: false },
+      { label: "Upper seam", value: CUBE_FACE_LABELS[neighbors.up], active: false },
+      { label: "Lower seam", value: CUBE_FACE_LABELS[neighbors.down], active: false },
+    ];
+  }, [snapshot.face]);
+
   const floorSteps = useMemo(
     () =>
       Array.from({ length: snapshot.layerCount }, (_, index) => ({
@@ -155,16 +170,24 @@ export function App() {
   );
 
   const cameraHint = useMemo(() => {
+    if (snapshot.topology === "cube" && snapshot.topologyCue) {
+      return snapshot.topologyCue;
+    }
+
     if (snapshot.currentTile === "hole") {
       return "Hole underfoot — amber shafts auto-drop you to the next safe floor below.";
     }
 
     if (snapshot.canClimbUp || snapshot.canClimbDown) {
-      return "Ladder in reach — use Floor Up / Down or Q / E to change levels.";
+      return `Ladder in reach — use ${layerLabel} Up / Down or Q / E to change levels.`;
+    }
+
+    if (snapshot.topology === "cube") {
+      return "Drag to orbit the cube block. Cardinal inputs stay camera-relative, and open side seams wrap you onto adjacent faces.";
     }
 
     return "Drag the maze to rotate the camera. Arrow controls follow the current view; pinch or scroll to zoom.";
-  }, [snapshot.canClimbDown, snapshot.canClimbUp, snapshot.currentTile]);
+  }, [snapshot.canClimbDown, snapshot.canClimbUp, snapshot.currentTile, snapshot.topology, snapshot.topologyCue, layerLabel]);
 
   return (
     <main className="shell">
@@ -194,8 +217,9 @@ export function App() {
               </div>
               <div className="layer-readout">
                 <span className="floor-chip">
-                  Floor {snapshot.layer + 1} / {snapshot.layerCount}
+                  {layerLabel} {snapshot.layer + 1} / {snapshot.layerCount}
                 </span>
+                {faceLabel ? <span className="face-chip">{faceLabel}</span> : null}
                 <span className={`tile-chip tile-chip--${snapshot.currentTile}`}>{tileStatus}</span>
               </div>
               {snapshot.layerCount > 1 ? (
@@ -203,7 +227,7 @@ export function App() {
                   <div
                     className="floor-stack"
                     role="list"
-                    aria-label={`Current floor ${snapshot.layer + 1} of ${snapshot.layerCount}`}
+                    aria-label={`Current ${layerLabel.toLowerCase()} ${snapshot.layer + 1} of ${snapshot.layerCount}`}
                   >
                     {floorSteps.map((step) => (
                       <div
@@ -212,11 +236,25 @@ export function App() {
                         role="listitem"
                         aria-current={step.isActive ? "step" : undefined}
                       >
-                        <span>Floor {step.index + 1}</span>
+                        <span>{layerLabel} {step.index + 1}</span>
                         <strong>{step.isActive ? "Current" : step.index > snapshot.layer ? "Above" : "Below"}</strong>
                       </div>
                     ))}
                   </div>
+                  {faceMap ? (
+                    <div className="topology-map" role="list" aria-label={`Cube face focus ${faceLabel}`}>
+                      {faceMap.map((entry) => (
+                        <div
+                          key={entry.label}
+                          className={`topology-card${entry.active ? " topology-card--active" : ""}`}
+                          role="listitem"
+                        >
+                          <span>{entry.label}</span>
+                          <strong>{entry.value}</strong>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
                   <div className="tile-legend" aria-label="Traversal marker legend">
                     <span className="tile-legend__item tile-legend__item--ladder">Ladder = climb</span>
                     <span className="tile-legend__item tile-legend__item--hole">Hole = drop</span>
@@ -224,8 +262,9 @@ export function App() {
                 </div>
               ) : null}
               <p>
-                Reach the green beacon. Cyan ladders connect floors, amber shafts drop you down, and the floor stack
-                keeps your current deck in view. Avoid the red patrol — one hit ends the run until you restart.
+                {snapshot.topology === "cube"
+                  ? "Reach the green beacon by wrapping around the block, chaining cyan ladder climbs between tiers, and reading the active-face cues before each seam. Avoid the red patrol — one hit ends the run until you restart."
+                  : "Reach the green beacon. Cyan ladders connect floors, amber shafts drop you down, and the floor stack keeps your current deck in view. Avoid the red patrol — one hit ends the run until you restart."}
               </p>
             </div>
           </div>
@@ -282,7 +321,7 @@ export function App() {
               aria-label="Climb to the upper floor"
             >
               <ArrowUp aria-hidden="true" />
-              <span>Floor up</span>
+              <span>{layerLabel} up</span>
             </button>
             <button
               type="button"
@@ -291,7 +330,7 @@ export function App() {
               aria-label="Climb to the lower floor"
             >
               <ArrowDown aria-hidden="true" />
-              <span>Floor down</span>
+              <span>{layerLabel} down</span>
             </button>
           </div>
         ) : null}

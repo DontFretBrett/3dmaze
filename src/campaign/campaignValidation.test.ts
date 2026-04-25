@@ -9,51 +9,14 @@ import {
 import { CAMPAIGN_LEVEL_DEFINITIONS, LEVEL_3, LEVEL_4 } from "./levelDefinitions";
 import {
   createRuntimeLevel,
+  forEachCoordinate,
   getTileAt,
-  isWalkableTile,
   resolveHoleLanding,
   type LevelCoordinate,
   type RuntimeLevel,
   type Tile,
 } from "../levelRuntime";
-
-function keyOf(cell: LevelCoordinate) {
-  return `${cell.layer}:${cell.x}:${cell.z}`;
-}
-
-function resolveEntry(level: RuntimeLevel, cell: LevelCoordinate) {
-  const landed = resolveHoleLanding(level, cell);
-  if (!landed) {
-    throw new Error(`Hole shaft at ${keyOf(cell)} has no stable landing.`);
-  }
-  return landed;
-}
-
-function getNeighbors(level: RuntimeLevel, cell: LevelCoordinate) {
-  const neighbors: LevelCoordinate[] = [];
-
-  for (const [dx, dz] of [
-    [1, 0],
-    [-1, 0],
-    [0, 1],
-    [0, -1],
-  ] as const) {
-    const next = { x: cell.x + dx, z: cell.z + dz, layer: cell.layer } satisfies LevelCoordinate;
-    if (!isWalkableTile(level, next.x, next.z, next.layer)) continue;
-    neighbors.push(resolveEntry(level, next));
-  }
-
-  if (getTileAt(level, cell.x, cell.z, cell.layer) === "ladder") {
-    for (const layerOffset of [-1, 1] as const) {
-      const target = { x: cell.x, z: cell.z, layer: cell.layer + layerOffset } satisfies LevelCoordinate;
-      if (getTileAt(level, target.x, target.z, target.layer) === "ladder") {
-        neighbors.push(target);
-      }
-    }
-  }
-
-  return neighbors;
-}
+import { getTraversalNeighbors, keyOf, sameCoordinate } from "./campaignAssessment";
 
 function canReachFinish(level: RuntimeLevel) {
   const frontier: LevelCoordinate[] = [{ ...level.start }];
@@ -66,11 +29,11 @@ function canReachFinish(level: RuntimeLevel) {
       return true;
     }
 
-    for (const next of getNeighbors(level, current)) {
-      const key = keyOf(next);
+    for (const next of getTraversalNeighbors(level, current)) {
+      const key = keyOf(next.cell);
       if (seen.has(key)) continue;
       seen.add(key);
-      frontier.push(next);
+      frontier.push(next.cell);
     }
   }
 
@@ -85,11 +48,11 @@ function getReachableCells(level: RuntimeLevel) {
     const current = frontier.shift();
     if (!current) break;
 
-    for (const next of getNeighbors(level, current)) {
-      const key = keyOf(next);
+    for (const next of getTraversalNeighbors(level, current)) {
+      const key = keyOf(next.cell);
       if (seen.has(key)) continue;
       seen.add(key);
-      frontier.push(next);
+      frontier.push(next.cell);
     }
   }
 
@@ -104,7 +67,7 @@ function getShortestPath(level: RuntimeLevel) {
   while (frontier.length > 0) {
     const current = frontier.shift();
     if (!current) break;
-    if (keyOf(current) === keyOf(level.finish)) {
+    if (sameCoordinate(current, level.finish)) {
       const path: LevelCoordinate[] = [];
       let cursor: LevelCoordinate | undefined = current;
 
@@ -116,12 +79,12 @@ function getShortestPath(level: RuntimeLevel) {
       return path.reverse();
     }
 
-    for (const next of getNeighbors(level, current)) {
-      const key = keyOf(next);
+    for (const next of getTraversalNeighbors(level, current)) {
+      const key = keyOf(next.cell);
       if (seen.has(key)) continue;
       seen.add(key);
       parentByCell.set(key, current);
-      frontier.push(next);
+      frontier.push(next.cell);
     }
   }
 
@@ -130,15 +93,11 @@ function getShortestPath(level: RuntimeLevel) {
 
 function countTiles(level: RuntimeLevel, match: Tile) {
   let count = 0;
-  for (let layer = 0; layer < level.layerCount; layer += 1) {
-    for (let z = 0; z < level.depth; z += 1) {
-      for (let x = 0; x < level.width; x += 1) {
-        if (getTileAt(level, x, z, layer) === match) {
-          count += 1;
-        }
-      }
+  forEachCoordinate(level, (coord) => {
+    if (getTileAt(level, coord.x, coord.z, coord.layer, coord.face) === match) {
+      count += 1;
     }
-  }
+  });
   return count;
 }
 
@@ -217,27 +176,26 @@ describe("campaign validation", () => {
 
   it("preserves authored multi-layer traversal landmarks for LEVEL_3 and LEVEL_4", () => {
     const level3 = createRuntimeLevel(LEVEL_3);
+    expect(level3.topology).toBe("cube");
     expect(level3.layerCount).toBe(2);
-    expect(level3.start).toEqual({ x: 1, z: 1, layer: 0 });
-    expect(level3.finish).toEqual({ x: 9, z: 9, layer: 1 });
-    expect(getTileAt(level3, 5, 1, 0)).toBe("ladder");
-    expect(getTileAt(level3, 5, 1, 1)).toBe("ladder");
-    expect(getTileAt(level3, 7, 7, 0)).toBe("ladder");
-    expect(getTileAt(level3, 7, 7, 1)).toBe("ladder");
-    expect(getTileAt(level3, 5, 5, 1)).toBe("hole");
-    expect(resolveHoleLanding(level3, { x: 5, z: 5, layer: 1 })).toEqual({ x: 5, z: 5, layer: 0 });
+    expect(level3.start).toEqual({ x: 1, z: 3, layer: 0, face: "north" });
+    expect(level3.finish).toEqual({ x: 5, z: 3, layer: 1, face: "south" });
+    expect(getTileAt(level3, 3, 3, 0, "east")).toBe("ladder");
+    expect(getTileAt(level3, 3, 3, 1, "east")).toBe("ladder");
+    expect(getTileAt(level3, 1, 1, 1, "west")).toBe("hole");
+    expect(resolveHoleLanding(level3, { x: 1, z: 1, layer: 1, face: "west" })).toEqual({ x: 1, z: 1, layer: 0, face: "west" });
 
     const level4 = createRuntimeLevel(LEVEL_4);
+    expect(level4.topology).toBe("cube");
     expect(level4.layerCount).toBe(3);
-    expect(level4.start).toEqual({ x: 1, z: 1, layer: 0 });
-    expect(level4.finish).toEqual({ x: 11, z: 11, layer: 2 });
-    expect(getTileAt(level4, 5, 1, 0)).toBe("ladder");
-    expect(getTileAt(level4, 5, 1, 1)).toBe("ladder");
-    expect(getTileAt(level4, 5, 1, 2)).toBe("ladder");
-    expect(getTileAt(level4, 5, 11, 0)).toBe("ladder");
-    expect(getTileAt(level4, 5, 11, 1)).toBe("ladder");
-    expect(getTileAt(level4, 5, 11, 2)).toBe("ladder");
-    expect(getTileAt(level4, 5, 5, 1)).toBe("hole");
+    expect(level4.start).toEqual({ x: 2, z: 3, layer: 0, face: "east" });
+    expect(level4.finish).toEqual({ x: 5, z: 3, layer: 2, face: "south" });
+    expect(getTileAt(level4, 3, 3, 0, "east")).toBe("ladder");
+    expect(getTileAt(level4, 3, 3, 1, "east")).toBe("ladder");
+    expect(getTileAt(level4, 3, 3, 1, "west")).toBe("ladder");
+    expect(getTileAt(level4, 3, 3, 2, "west")).toBe("ladder");
+    expect(getTileAt(level4, 5, 1, 1, "north")).toBe("hole");
+    expect(getTileAt(level4, 1, 5, 2, "south")).toBe("hole");
   });
 
   it("can traverse the full campaign sequence without missing references", () => {

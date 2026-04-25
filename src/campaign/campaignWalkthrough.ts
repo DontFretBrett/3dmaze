@@ -1,8 +1,9 @@
 import type { Direction } from "../MazeGame";
-import { createRuntimeLevel, type LevelCoordinate, type RuntimeLevel } from "../levelRuntime";
-import { getTraversalNeighbors, keyOf, sameCoordinate } from "./campaignAssessment";
+import { createRuntimeLevel, sameCoordinate, type LevelCoordinate, type RuntimeLevel } from "../levelRuntime";
+import { getTraversalNeighbors, keyOf } from "./campaignAssessment";
 import { CAMPAIGN_LEVELS, type CampaignLevelId } from "./campaignProgression";
 import { CAMPAIGN_LEVEL_DEFINITIONS } from "./levelDefinitions";
+import { resolveHorizontalTraversal } from "../verticalTraversal";
 
 export type CampaignAction = Direction | "up" | "down";
 
@@ -50,23 +51,31 @@ function getShortestPath(level: RuntimeLevel) {
   return [] as LevelCoordinate[];
 }
 
-function toAction(from: LevelCoordinate, to: LevelCoordinate): CampaignAction {
+function toAction(level: RuntimeLevel, from: LevelCoordinate, to: LevelCoordinate): CampaignAction {
   if (to.layer !== from.layer) {
     return to.layer > from.layer ? "up" : "down";
   }
 
-  if (to.x !== from.x) {
-    return to.x > from.x ? "right" : "left";
+  for (const [action, dx, dz] of [
+    ["right", 1, 0],
+    ["left", -1, 0],
+    ["backward", 0, 1],
+    ["forward", 0, -1],
+  ] as const satisfies readonly [Direction, number, number][]) {
+    const plan = resolveHorizontalTraversal(level, from, dx, dz, 1);
+    if (plan && sameCoordinate(plan.destination, to)) {
+      return action;
+    }
   }
 
-  return to.z > from.z ? "backward" : "forward";
+  throw new Error(`No authored action resolves ${keyOf(from)} -> ${keyOf(to)}.`);
 }
 
 export function buildCampaignWalkthroughs() {
   return CAMPAIGN_LEVELS.map((campaignLevel, index) => {
     const runtimeLevel = createRuntimeLevel(CAMPAIGN_LEVEL_DEFINITIONS[index]);
     const path = getShortestPath(runtimeLevel);
-    const actions = path.slice(1).map((cell, pathIndex) => toAction(path[pathIndex]!, cell));
+    const actions = path.slice(1).map((cell, pathIndex) => toAction(runtimeLevel, path[pathIndex]!, cell));
     const firstVerticalActionIndex = actions.findIndex((action) => action === "up" || action === "down");
 
     return {

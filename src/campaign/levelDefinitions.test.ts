@@ -16,22 +16,23 @@ describe("campaign level definitions", () => {
     expect(ACTIVE_LEVEL).toBe(LEVEL_1);
   });
 
-  it("keeps the first two levels in the legacy single-layer format", () => {
+  it("keeps the first two levels in the legacy single-layer format and the new cube block in levels 3-4", () => {
     expect("maze" in LEVEL_1).toBe(true);
     expect("maze" in LEVEL_2).toBe(true);
-    expect("layers" in LEVEL_3).toBe(true);
-    expect("layers" in LEVEL_4).toBe(true);
+    expect(LEVEL_3.topology).toBe("cube");
+    expect(LEVEL_4.topology).toBe("cube");
     expect("layers" in LEVEL_10).toBe(true);
   });
 
-  it("parses layered authored levels into runtime levels with traversal tiles", () => {
+  it("parses cube-authored campaign levels into runtime levels with traversal tiles", () => {
     const runtimeLevel = createRuntimeLevel(LEVEL_3);
 
+    expect(runtimeLevel.topology).toBe("cube");
     expect(runtimeLevel.layerCount).toBe(2);
-    expect(runtimeLevel.start).toEqual({ x: 1, z: 1, layer: 0 });
-    expect(runtimeLevel.finish).toEqual({ x: 9, z: 9, layer: 1 });
-    expect(getTileAt(runtimeLevel, 5, 1, 0)).toBe("ladder");
-    expect(getTileAt(runtimeLevel, 5, 5, 1)).toBe("hole");
+    expect(runtimeLevel.start).toEqual({ x: 1, z: 3, layer: 0, face: "north" });
+    expect(runtimeLevel.finish).toEqual({ x: 5, z: 3, layer: 1, face: "south" });
+    expect(getTileAt(runtimeLevel, 3, 3, 0, "east")).toBe("ladder");
+    expect(getTileAt(runtimeLevel, 1, 1, 1, "west")).toBe("hole");
   });
 
   it("keeps legacy single-layer authored levels backward compatible", () => {

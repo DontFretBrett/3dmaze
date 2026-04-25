@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import gsap from "gsap";
 import * as THREE from "three";
 import { ACTIVE_LEVEL } from "./campaign/levelDefinitions";
+import { CUBE_FACE_LABELS, CUBE_FACES, getCubeFaceNeighbors, getCubeFaceOrientation } from "./cubeTopology";
 import { PLAYER_MOVE_SECONDS } from "./enemyDesign";
 import {
   createEnemyState,
@@ -13,8 +14,10 @@ import {
 import {
   createRuntimeLevel,
   getTileAt,
+  type CubeFace,
   type LevelCoordinate,
   type LevelDefinition,
+  type LevelTopology,
   type RuntimeLevel,
 } from "./levelRuntime";
 import { describeCurrentTile } from "./gameSnapshot";
@@ -42,9 +45,12 @@ export interface GameSnapshot {
   isStunned: boolean;
   layer: number;
   layerCount: number;
+  topology: LevelTopology;
+  face: CubeFace | null;
   currentTile: CurrentTileKind;
   canClimbUp: boolean;
   canClimbDown: boolean;
+  topologyCue: string | null;
 }
 
 interface MazeGameProps {
@@ -87,17 +93,124 @@ const rotationSpeed = 0.008;
 const zoomSpeed = 0.016;
 const cameraTargetHeight = 0.8;
 const movementYawMode: MovementYawMode = "continuous";
+const cubeFaceGap = 0.38;
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
+function toThreeVector(vector: { x: number; y: number; z: number }) {
+  return new THREE.Vector3(vector.x, vector.y, vector.z);
+}
+
+function getFaceQuaternion(face: CubeFace) {
+  const orientation = getCubeFaceOrientation(face);
+  const right = toThreeVector(orientation.right);
+  const up = toThreeVector({
+    x: -orientation.down.x,
+    y: -orientation.down.y,
+    z: -orientation.down.z,
+  });
+  const normal = toThreeVector(orientation.normal);
+  const matrix = new THREE.Matrix4().makeBasis(right, up, normal);
+  return new THREE.Quaternion().setFromRotationMatrix(matrix);
+}
+
+function cellToWorld(level: RuntimeLevel, cell: LevelCoordinate, normalOffset = 0) {
+  if (level.topology === "stack") {
+    return new THREE.Vector3(
+      (cell.x - (level.width - 1) / 2) * CELL_SIZE,
+      cell.layer * layerHeight + normalOffset,
+      (cell.z - (level.depth - 1) / 2) * CELL_SIZE,
+    );
+  }
+
+  const orientation = getCubeFaceOrientation(cell.face!);
+  const right = toThreeVector(orientation.right);
+  const down = toThreeVector(orientation.down);
+  const normal = toThreeVector(orientation.normal);
+  const halfExtent = (level.width * CELL_SIZE) / 2 + cubeFaceGap;
+  const layerOffset = new THREE.Vector3(0, cell.layer * layerHeight, 0);
+  const localX = (cell.x - (level.width - 1) / 2) * CELL_SIZE;
+  const localZ = (cell.z - (level.depth - 1) / 2) * CELL_SIZE;
+
+  return normal
+    .multiplyScalar(halfExtent + normalOffset)
+    .add(right.multiplyScalar(localX))
+    .add(down.multiplyScalar(localZ))
+    .add(layerOffset);
+}
+
+function setCubeSurfaceTransform(
+  object: THREE.Object3D,
+  level: RuntimeLevel,
+  cell: LevelCoordinate,
+  normalOffset: number,
+) {
+  object.position.copy(cellToWorld(level, cell, normalOffset));
+  object.quaternion.copy(getFaceQuaternion(cell.face!));
+}
+
 function gridToWorld(level: RuntimeLevel, cell: LevelCoordinate) {
-  return new THREE.Vector3(
-    (cell.x - (level.width - 1) / 2) * CELL_SIZE,
-    cell.layer * layerHeight,
-    (cell.z - (level.depth - 1) / 2) * CELL_SIZE,
-  );
+  return cellToWorld(level, cell, 0);
+}
+
+function getTopologyCueLabel(face: CubeFace | undefined, seam: { fromFace: CubeFace; toFace: CubeFace } | null) {
+  if (seam) {
+    return `Seam crossed: ${CUBE_FACE_LABELS[seam.fromFace]} to ${CUBE_FACE_LABELS[seam.toFace]}.`;
+  }
+
+  return face ? `${CUBE_FACE_LABELS[face]} in focus.` : null;
+}
+
+function getCubeFaceVisibility(activeFace: CubeFace, face: CubeFace) {
+  if (face === activeFace) {
+    return { opacity: 1, deckOpacity: 0.7, emphasis: 1 };
+  }
+
+  const neighbors = getCubeFaceNeighbors(activeFace);
+  const isNeighbor = Object.values(neighbors).includes(face);
+  if (isNeighbor) {
+    return { opacity: 0.55, deckOpacity: 0.24, emphasis: 0.62 };
+  }
+
+  return { opacity: 0.18, deckOpacity: 0.08, emphasis: 0.24 };
+}
+
+function refreshCubeVisuals(
+  materialsByLayer: Record<CubeFace, LayerMaterials>[],
+  activeLayer: number,
+  activeFace: CubeFace,
+) {
+  materialsByLayer.forEach((faces, layerIndex) => {
+    const layerFade = layerIndex === activeLayer ? 1 : layerIndex === activeLayer - 1 || layerIndex === activeLayer + 1 ? 0.52 : 0.28;
+    CUBE_FACES.forEach((face) => {
+      const { opacity, deckOpacity, emphasis } = getCubeFaceVisibility(activeFace, face);
+      const materials = faces[face];
+      const fade = opacity * layerFade;
+
+      materials.floor.opacity = 0.2 + 0.76 * fade;
+      materials.floor.emissiveIntensity = 0.16 + 0.86 * fade;
+      materials.floor.color.set(face === activeFace ? "#102f29" : "#0a1b18");
+      materials.floor.emissive.set(face === activeFace ? "#15574d" : "#081411");
+
+      materials.wall.opacity = 0.16 + 0.8 * fade;
+      materials.wall.emissiveIntensity = 0.16 + 0.6 * emphasis * layerFade;
+      materials.path.opacity = 0.18 + 0.76 * fade;
+      materials.path.emissiveIntensity = 0.08 + 0.34 * emphasis * layerFade;
+      materials.path.color.set(face === activeFace ? "#18463b" : "#102923");
+
+      materials.edge.opacity = 0.04 + 0.24 * fade;
+      materials.deckFrame.opacity = deckOpacity * layerFade;
+      materials.deckFrame.color.set(face === activeFace ? "#7ef4ff" : "#215851");
+      materials.ladderPad.opacity = 0.28 + 0.7 * fade;
+      materials.ladderBeam.opacity = 0.22 + 0.7 * fade;
+      materials.ladderSpine.opacity = 0.16 + 0.68 * fade;
+      materials.holeWell.opacity = 0.18 + 0.78 * fade;
+      materials.holeRing.opacity = 0.22 + 0.76 * fade;
+      materials.holeShaft.opacity = 0.12 + 0.48 * fade;
+    });
+  });
 }
 
 function getTileCuePalette(tile: CurrentTileKind) {
@@ -277,6 +390,7 @@ export function MazeGame({ level = ACTIVE_LEVEL, onReady, onSnapshot }: MazeGame
     let contacts = 0;
     let playerCell: LevelCoordinate = { ...runtimeLevel.start };
     let visualCell: LevelCoordinate = { ...runtimeLevel.start };
+    let topologyCue = getTopologyCueLabel(visualCell.face, null);
     let playerTween: gsap.core.Animation | null = null;
     let enemyTween: gsap.core.Tween | null = null;
     let enemyState: EnemyRuntimeState | null = enemyFeatureEnabled ? createEnemyState(runtimeLevel, startTime) : null;
@@ -286,6 +400,26 @@ export function MazeGame({ level = ACTIVE_LEVEL, onReady, onSnapshot }: MazeGame
     let pinchDistance = 0;
     const activePointers = new Map<number, { x: number; y: number }>();
 
+    const setActorPosition = (rig: THREE.Object3D, cell: LevelCoordinate, baseHeight: number, bob = 0) => {
+      rig.position.copy(cellToWorld(runtimeLevel, cell, baseHeight + bob));
+    };
+
+    const orientSurfaceMarker = (
+      object: THREE.Object3D,
+      cell: LevelCoordinate,
+      normalOffset: number,
+      spinRadians = 0,
+    ) => {
+      object.position.copy(cellToWorld(runtimeLevel, cell, normalOffset));
+      if (runtimeLevel.topology === "cube" && cell.face) {
+        object.quaternion.copy(getFaceQuaternion(cell.face));
+        object.quaternion.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI / 2, 0, spinRadians)));
+        return;
+      }
+
+      object.rotation.set(-Math.PI / 2, 0, spinRadians);
+    };
+
     const scene = new THREE.Scene();
     scene.background = new THREE.Color("#07110f");
     scene.fog = new THREE.Fog("#07110f", 18, 66 + stressCopies * 28);
@@ -294,7 +428,7 @@ export function MazeGame({ level = ACTIVE_LEVEL, onReady, onSnapshot }: MazeGame
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.type = THREE.PCFShadowMap;
     mount.appendChild(renderer.domElement);
 
     const ambientLight = new THREE.HemisphereLight("#b4fff0", "#11251f", 1.45);
@@ -306,14 +440,24 @@ export function MazeGame({ level = ACTIVE_LEVEL, onReady, onSnapshot }: MazeGame
     keyLight.shadow.mapSize.set(1024, 1024);
     scene.add(keyLight);
 
-    const finishWorld = gridToWorld(runtimeLevel, runtimeLevel.finish);
-    const startWorld = gridToWorld(runtimeLevel, runtimeLevel.start);
+    const finishWorld = cellToWorld(runtimeLevel, runtimeLevel.finish, 0.82);
     const beaconLight = new THREE.PointLight("#42ff99", 7.5, 30);
     beaconLight.position.set(finishWorld.x, finishWorld.y + 3.5, finishWorld.z);
     scene.add(beaconLight);
 
-    const layerMaterials = runtimeLevel.layers.map(() => createLayerMaterials());
-    const layerGroups = runtimeLevel.layers.map(() => [] as THREE.Group[]);
+    const stackLayerMaterials = runtimeLevel.topology === "stack" ? runtimeLevel.layers.map(() => createLayerMaterials()) : [];
+    const cubeFaceMaterials = runtimeLevel.topology === "cube"
+      ? runtimeLevel.cubeLayers.map(
+          () =>
+            Object.fromEntries(CUBE_FACES.map((face) => [face, createLayerMaterials()])) as Record<CubeFace, LayerMaterials>,
+        )
+      : [];
+    const layerGroups = runtimeLevel.topology === "stack" ? runtimeLevel.layers.map(() => [] as THREE.Group[]) : [];
+    const cubeFaceGroups = runtimeLevel.topology === "cube"
+      ? runtimeLevel.cubeLayers.map(
+          () => Object.fromEntries(CUBE_FACES.map((face) => [face, [] as THREE.Group[]])) as Record<CubeFace, THREE.Group[]>,
+        )
+      : [];
     const floorGeometry = new THREE.BoxGeometry(runtimeLevel.width * CELL_SIZE, 0.28, runtimeLevel.depth * CELL_SIZE);
     const wallGeometry = new THREE.BoxGeometry(CELL_SIZE, 3.2, CELL_SIZE);
     const pathGeometry = new THREE.BoxGeometry(CELL_SIZE * 0.9, 0.08, CELL_SIZE * 0.9);
@@ -321,6 +465,13 @@ export function MazeGame({ level = ACTIVE_LEVEL, onReady, onSnapshot }: MazeGame
     const deckFrameGeometry = new THREE.EdgesGeometry(
       new THREE.BoxGeometry(runtimeLevel.width * CELL_SIZE + 0.48, 0.4, runtimeLevel.depth * CELL_SIZE + 0.48),
     );
+    const cubeFaceFrameGeometry = new THREE.EdgesGeometry(
+      new THREE.BoxGeometry(runtimeLevel.width * CELL_SIZE + 0.34, runtimeLevel.depth * CELL_SIZE + 0.34, 0.28),
+    );
+    const cubeTileGeometry = new THREE.BoxGeometry(CELL_SIZE * 0.94, CELL_SIZE * 0.94, 0.22);
+    const cubePathGeometry = new THREE.BoxGeometry(CELL_SIZE * 0.74, CELL_SIZE * 0.74, 0.06);
+    const cubeWallGeometry = new THREE.BoxGeometry(CELL_SIZE * 0.94, CELL_SIZE * 0.94, 2.2);
+    const cubeWallEdgeGeometry = new THREE.EdgesGeometry(cubeWallGeometry);
     const ladderPadGeometry = new THREE.CylinderGeometry(0.78, 0.78, 0.18, 24);
     const ladderBeamGeometry = new THREE.CylinderGeometry(0.14, 0.14, 2.2, 10);
     const ladderSpineGeometry = new THREE.CylinderGeometry(0.18, 0.18, layerHeight - 0.48, 12);
@@ -338,84 +489,182 @@ export function MazeGame({ level = ACTIVE_LEVEL, onReady, onSnapshot }: MazeGame
     const stressStackSpacing = runtimeLevel.layerCount * layerHeight + 8;
     for (let stack = 0; stack <= stressCopies; stack += 1) {
       const stackY = stack * stressStackSpacing;
-      runtimeLevel.layers.forEach((layer, layerIndex) => {
-        const baseY = stackY + layerIndex * layerHeight;
-        const materials = layerMaterials[layerIndex];
-        const layerGroup = new THREE.Group();
-        layerGroups[layerIndex]?.push(layerGroup);
-        scene.add(layerGroup);
+      if (runtimeLevel.topology === "stack") {
+        runtimeLevel.layers.forEach((layer, layerIndex) => {
+          const baseY = stackY + layerIndex * layerHeight;
+          const materials = stackLayerMaterials[layerIndex];
+          const layerGroup = new THREE.Group();
+          layerGroups[layerIndex]?.push(layerGroup);
+          scene.add(layerGroup);
 
-        const floor = new THREE.Mesh(floorGeometry, materials.floor);
-        floor.position.y = baseY - 0.18;
-        floor.receiveShadow = true;
-        layerGroup.add(floor);
+          const floor = new THREE.Mesh(floorGeometry, materials.floor);
+          floor.position.y = baseY - 0.18;
+          floor.receiveShadow = true;
+          layerGroup.add(floor);
 
-        const deckFrame = new THREE.LineSegments(deckFrameGeometry, materials.deckFrame);
-        deckFrame.position.set(0, baseY + 0.02, 0);
-        layerGroup.add(deckFrame);
+          const deckFrame = new THREE.LineSegments(deckFrameGeometry, materials.deckFrame);
+          deckFrame.position.set(0, baseY + 0.02, 0);
+          layerGroup.add(deckFrame);
 
-        layer.forEach((row, z) => {
-          row.forEach((tile, x) => {
-            const world = gridToWorld(runtimeLevel, { x, z, layer: layerIndex });
-            world.y += stackY;
+          layer.forEach((row, z) => {
+            row.forEach((tile, x) => {
+              const world = gridToWorld(runtimeLevel, { x, z, layer: layerIndex });
+              world.y += stackY;
 
-            if (tile === 1) {
-              const wall = new THREE.Mesh(wallGeometry, materials.wall);
-              wall.position.set(world.x, baseY + 1.42, world.z);
-              wall.castShadow = true;
-              wall.receiveShadow = true;
-              layerGroup.add(wall);
+              if (tile === 1) {
+                const wall = new THREE.Mesh(wallGeometry, materials.wall);
+                wall.position.set(world.x, baseY + 1.42, world.z);
+                wall.castShadow = true;
+                wall.receiveShadow = true;
+                layerGroup.add(wall);
 
-              const edge = new THREE.LineSegments(edgeGeometry, materials.edge);
-              edge.position.copy(wall.position);
-              layerGroup.add(edge);
-              return;
-            }
-
-            const pathTile = new THREE.Mesh(pathGeometry, materials.path);
-            pathTile.position.set(world.x, baseY + 0.02, world.z);
-            pathTile.receiveShadow = true;
-            layerGroup.add(pathTile);
-
-            if (tile === "ladder") {
-              const ladderPad = new THREE.Mesh(ladderPadGeometry, materials.ladderPad);
-              ladderPad.position.set(world.x, baseY + 0.14, world.z);
-              ladderPad.castShadow = true;
-              ladderPad.receiveShadow = true;
-              layerGroup.add(ladderPad);
-
-              const ladderBeam = new THREE.Mesh(ladderBeamGeometry, materials.ladderBeam);
-              ladderBeam.position.set(world.x, baseY + 1.2, world.z);
-              ladderBeam.castShadow = true;
-              layerGroup.add(ladderBeam);
-
-              if (getTileAt(runtimeLevel, x, z, layerIndex + 1) === "ladder") {
-                const ladderSpine = new THREE.Mesh(ladderSpineGeometry, materials.ladderSpine);
-                ladderSpine.position.set(world.x, baseY + layerHeight / 2, world.z);
-                ladderSpine.castShadow = true;
-                ladderSpine.receiveShadow = true;
-                layerGroup.add(ladderSpine);
+                const edge = new THREE.LineSegments(edgeGeometry, materials.edge);
+                edge.position.copy(wall.position);
+                layerGroup.add(edge);
+                return;
               }
-            }
 
-            if (tile === "hole") {
-              const holeWell = new THREE.Mesh(holeWellGeometry, materials.holeWell);
-              holeWell.position.set(world.x, baseY + 0.06, world.z);
-              holeWell.receiveShadow = true;
-              layerGroup.add(holeWell);
+              const pathTile = new THREE.Mesh(pathGeometry, materials.path);
+              pathTile.position.set(world.x, baseY + 0.02, world.z);
+              pathTile.receiveShadow = true;
+              layerGroup.add(pathTile);
 
-              const holeRing = new THREE.Mesh(holeRingGeometry, materials.holeRing);
-              holeRing.position.set(world.x, baseY + 0.18, world.z);
-              holeRing.rotation.x = Math.PI / 2;
-              layerGroup.add(holeRing);
+              if (tile === "ladder") {
+                const ladderPad = new THREE.Mesh(ladderPadGeometry, materials.ladderPad);
+                ladderPad.position.set(world.x, baseY + 0.14, world.z);
+                ladderPad.castShadow = true;
+                ladderPad.receiveShadow = true;
+                layerGroup.add(ladderPad);
 
-              if (layerIndex > 0) {
-                const holeShaft = new THREE.Mesh(holeShaftGeometry, materials.holeShaft);
-                holeShaft.position.set(world.x, baseY - layerHeight / 2, world.z);
-                holeShaft.receiveShadow = true;
-                layerGroup.add(holeShaft);
+                const ladderBeam = new THREE.Mesh(ladderBeamGeometry, materials.ladderBeam);
+                ladderBeam.position.set(world.x, baseY + 1.2, world.z);
+                ladderBeam.castShadow = true;
+                layerGroup.add(ladderBeam);
+
+                if (getTileAt(runtimeLevel, x, z, layerIndex) === "ladder" && getTileAt(runtimeLevel, x, z, layerIndex + 1) === "ladder") {
+                  const ladderSpine = new THREE.Mesh(ladderSpineGeometry, materials.ladderSpine);
+                  ladderSpine.position.set(world.x, baseY + layerHeight / 2, world.z);
+                  ladderSpine.castShadow = true;
+                  ladderSpine.receiveShadow = true;
+                  layerGroup.add(ladderSpine);
+                }
               }
-            }
+
+              if (tile === "hole") {
+                const holeWell = new THREE.Mesh(holeWellGeometry, materials.holeWell);
+                holeWell.position.set(world.x, baseY + 0.06, world.z);
+                holeWell.receiveShadow = true;
+                layerGroup.add(holeWell);
+
+                const holeRing = new THREE.Mesh(holeRingGeometry, materials.holeRing);
+                holeRing.position.set(world.x, baseY + 0.18, world.z);
+                holeRing.rotation.x = Math.PI / 2;
+                layerGroup.add(holeRing);
+
+                if (layerIndex > 0) {
+                  const holeShaft = new THREE.Mesh(holeShaftGeometry, materials.holeShaft);
+                  holeShaft.position.set(world.x, baseY - layerHeight / 2, world.z);
+                  holeShaft.receiveShadow = true;
+                  layerGroup.add(holeShaft);
+                }
+              }
+            });
+          });
+        });
+        continue;
+      }
+
+      runtimeLevel.cubeLayers.forEach((cubeLayer, layerIndex) => {
+        CUBE_FACES.forEach((face) => {
+          const materials = cubeFaceMaterials[layerIndex][face];
+          const faceGroup = new THREE.Group();
+          cubeFaceGroups[layerIndex][face].push(faceGroup);
+          scene.add(faceGroup);
+
+          const frame = new THREE.LineSegments(cubeFaceFrameGeometry, materials.deckFrame);
+          frame.position.copy(cellToWorld(runtimeLevel, { x: Math.floor(runtimeLevel.width / 2), z: Math.floor(runtimeLevel.depth / 2), layer: layerIndex, face }, 0));
+          frame.position.y += stackY;
+          frame.quaternion.copy(getFaceQuaternion(face));
+          faceGroup.add(frame);
+
+          cubeLayer[face].forEach((row, z) => {
+            row.forEach((tile, x) => {
+              const cell = { x, z, layer: layerIndex, face } satisfies LevelCoordinate;
+
+              if (tile === 1) {
+                const wall = new THREE.Mesh(cubeWallGeometry, materials.wall);
+                setCubeSurfaceTransform(wall, runtimeLevel, cell, 1.14);
+                wall.position.y += stackY;
+                wall.castShadow = true;
+                wall.receiveShadow = true;
+                faceGroup.add(wall);
+
+                const edge = new THREE.LineSegments(cubeWallEdgeGeometry, materials.edge);
+                edge.position.copy(wall.position);
+                edge.quaternion.copy(wall.quaternion);
+                faceGroup.add(edge);
+                return;
+              }
+
+              const floorTile = new THREE.Mesh(cubeTileGeometry, materials.floor);
+              setCubeSurfaceTransform(floorTile, runtimeLevel, cell, 0.02);
+              floorTile.position.y += stackY;
+              floorTile.receiveShadow = true;
+              faceGroup.add(floorTile);
+
+              const pathTile = new THREE.Mesh(cubePathGeometry, materials.path);
+              setCubeSurfaceTransform(pathTile, runtimeLevel, cell, 0.16);
+              pathTile.position.y += stackY;
+              pathTile.receiveShadow = true;
+              faceGroup.add(pathTile);
+
+              if (tile === "ladder") {
+                const ladderPad = new THREE.Mesh(ladderPadGeometry, materials.ladderPad);
+                setCubeSurfaceTransform(ladderPad, runtimeLevel, cell, 0.34);
+                ladderPad.position.y += stackY;
+                ladderPad.castShadow = true;
+                ladderPad.receiveShadow = true;
+                faceGroup.add(ladderPad);
+
+                const ladderBeam = new THREE.Mesh(ladderBeamGeometry, materials.ladderBeam);
+                setCubeSurfaceTransform(ladderBeam, runtimeLevel, cell, 1.36);
+                ladderBeam.position.y += stackY;
+                ladderBeam.quaternion.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI / 2, 0, 0)));
+                ladderBeam.castShadow = true;
+                faceGroup.add(ladderBeam);
+
+                if (getTileAt(runtimeLevel, x, z, layerIndex + 1, face) === "ladder") {
+                  const ladderSpine = new THREE.Mesh(ladderSpineGeometry, materials.ladderSpine);
+                  ladderSpine.position.copy(cellToWorld(runtimeLevel, cell, 0.64));
+                  ladderSpine.position.y += stackY;
+                  ladderSpine.castShadow = true;
+                  ladderSpine.receiveShadow = true;
+                  faceGroup.add(ladderSpine);
+                }
+              }
+
+              if (tile === "hole") {
+                const holeWell = new THREE.Mesh(holeWellGeometry, materials.holeWell);
+                setCubeSurfaceTransform(holeWell, runtimeLevel, cell, 0.12);
+                holeWell.position.y += stackY;
+                holeWell.receiveShadow = true;
+                faceGroup.add(holeWell);
+
+                const holeRing = new THREE.Mesh(holeRingGeometry, materials.holeRing);
+                setCubeSurfaceTransform(holeRing, runtimeLevel, cell, 0.24);
+                holeRing.position.y += stackY;
+                holeRing.quaternion.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI / 2, 0, 0)));
+                faceGroup.add(holeRing);
+
+                if (layerIndex > 0) {
+                  const holeShaft = new THREE.Mesh(holeShaftGeometry, materials.holeShaft);
+                  holeShaft.position.copy(cellToWorld(runtimeLevel, cell, -layerHeight / 2));
+                  holeShaft.position.y += stackY;
+                  holeShaft.receiveShadow = true;
+                  faceGroup.add(holeShaft);
+                }
+              }
+            });
           });
         });
       });
@@ -432,10 +681,9 @@ export function MazeGame({ level = ACTIVE_LEVEL, onReady, onSnapshot }: MazeGame
         metalness: 0.55,
       }),
     );
-    player.position.y = playerBaseHeight;
     player.castShadow = true;
     playerRig.add(player);
-    playerRig.position.copy(gridToWorld(runtimeLevel, playerCell));
+    setActorPosition(playerRig, playerCell, playerBaseHeight);
     scene.add(playerRig);
 
     const enemyRig = new THREE.Group();
@@ -510,7 +758,7 @@ export function MazeGame({ level = ACTIVE_LEVEL, onReady, onSnapshot }: MazeGame
     enemyRig.add(enemyBody);
     enemyRig.visible = enemyFeatureEnabled && !!enemyState;
     if (enemyState) {
-      enemyRig.position.copy(gridToWorld(runtimeLevel, enemyState.cell));
+      setActorPosition(enemyRig, enemyState.cell, enemyBaseHeight);
     }
     scene.add(enemyRig);
 
@@ -524,8 +772,7 @@ export function MazeGame({ level = ACTIVE_LEVEL, onReady, onSnapshot }: MazeGame
       opacity: 0.94,
     });
     const startRing = new THREE.Mesh(new THREE.TorusGeometry(1.3, 0.05, 10, 64), startMaterial);
-    startRing.position.set(startWorld.x, startWorld.y + 0.2, startWorld.z);
-    startRing.rotation.x = Math.PI / 2;
+    orientSurfaceMarker(startRing, runtimeLevel.start, 0.22);
     scene.add(startRing);
 
     const finishMaterial = new THREE.MeshStandardMaterial({
@@ -535,12 +782,15 @@ export function MazeGame({ level = ACTIVE_LEVEL, onReady, onSnapshot }: MazeGame
       roughness: 0.2,
     });
     const beacon = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.9, 0.22, 32), finishMaterial);
-    beacon.position.set(finishWorld.x, finishWorld.y + 0.2, finishWorld.z);
+    beacon.position.copy(cellToWorld(runtimeLevel, runtimeLevel.finish, 0.34));
+    if (runtimeLevel.topology === "cube" && runtimeLevel.finish.face) {
+      beacon.quaternion.copy(getFaceQuaternion(runtimeLevel.finish.face));
+      beacon.quaternion.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI / 2, 0, 0)));
+    }
     scene.add(beacon);
 
     const beaconRing = new THREE.Mesh(new THREE.TorusGeometry(1.5, 0.055, 10, 72), finishMaterial);
-    beaconRing.position.set(finishWorld.x, finishWorld.y + 0.7, finishWorld.z);
-    beaconRing.rotation.x = Math.PI / 2;
+    orientSurfaceMarker(beaconRing, runtimeLevel.finish, 0.82);
     scene.add(beaconRing);
     const playerCueMaterial = new THREE.MeshBasicMaterial({
       color: "#8ff2cf",
@@ -557,12 +807,10 @@ export function MazeGame({ level = ACTIVE_LEVEL, onReady, onSnapshot }: MazeGame
       depthWrite: false,
     });
     const playerCueRing = new THREE.Mesh(new THREE.RingGeometry(0.84, 1.18, 40), playerCueMaterial);
-    playerCueRing.rotation.x = -Math.PI / 2;
     playerCueRing.renderOrder = 3;
     scene.add(playerCueRing);
 
     const playerCueFill = new THREE.Mesh(new THREE.CircleGeometry(0.56, 28), playerCueFillMaterial);
-    playerCueFill.rotation.x = -Math.PI / 2;
     playerCueFill.renderOrder = 2;
     scene.add(playerCueFill);
     const finishLayerObjects: THREE.Object3D[] = [beaconLight, beacon, beaconRing];
@@ -604,9 +852,12 @@ export function MazeGame({ level = ACTIVE_LEVEL, onReady, onSnapshot }: MazeGame
         isStunned: false,
         layer: visualCell.layer,
         layerCount: runtimeLevel.layerCount,
+        topology: runtimeLevel.topology,
+        face: visualCell.face ?? null,
         currentTile: describeCurrentTile(runtimeLevel, visualCell),
         canClimbUp: canClimbBetweenLayers(runtimeLevel, visualCell, 1),
         canClimbDown: canClimbBetweenLayers(runtimeLevel, visualCell, -1),
+        topologyCue,
       });
     };
 
@@ -616,14 +867,24 @@ export function MazeGame({ level = ACTIVE_LEVEL, onReady, onSnapshot }: MazeGame
     };
 
     const syncActiveLayerScene = (activeLayer: number) => {
-      refreshLayerVisuals(layerMaterials, activeLayer);
-
-      layerGroups.forEach((groups, layerIndex) => {
-        const presentation = getLayerPresentation(layerIndex, activeLayer);
-        groups.forEach((group) => {
-          group.visible = presentation.renderGeometry;
+      if (runtimeLevel.topology === "cube") {
+        refreshCubeVisuals(cubeFaceMaterials, activeLayer, visualCell.face ?? runtimeLevel.start.face ?? "north");
+        cubeFaceGroups.forEach((faces, layerIndex) => {
+          CUBE_FACES.forEach((face) => {
+            faces[face].forEach((group) => {
+              group.visible = layerIndex === activeLayer || layerIndex === activeLayer - 1 || layerIndex === activeLayer + 1;
+            });
+          });
         });
-      });
+      } else {
+        refreshLayerVisuals(stackLayerMaterials, activeLayer);
+        layerGroups.forEach((groups, layerIndex) => {
+          const presentation = getLayerPresentation(layerIndex, activeLayer);
+          groups.forEach((group) => {
+            group.visible = presentation.renderGeometry;
+          });
+        });
+      }
 
       const showFinishLayer = shouldRenderActorOnLayer(runtimeLevel.finish.layer, activeLayer);
       finishLayerObjects.forEach((object) => {
@@ -653,7 +914,7 @@ export function MazeGame({ level = ACTIVE_LEVEL, onReady, onSnapshot }: MazeGame
       enemyRig.visible = !!enemyState;
       if (!enemyState) return;
 
-      enemyRig.position.copy(gridToWorld(runtimeLevel, enemyState.cell));
+      setActorPosition(enemyRig, enemyState.cell, enemyBaseHeight);
       gsap.set(enemyBody.rotation, { x: 0, y: 0, z: 0 });
       gsap.set(enemyBody.scale, { x: 1, y: 1, z: 1 });
     };
@@ -681,7 +942,7 @@ export function MazeGame({ level = ACTIVE_LEVEL, onReady, onSnapshot }: MazeGame
       playerTween?.kill();
       playerTween = null;
       visualCell = { ...playerCell };
-      playerRig.position.copy(gridToWorld(runtimeLevel, playerCell));
+      setActorPosition(playerRig, playerCell, playerBaseHeight);
 
       clearEnemyMotion();
 
@@ -693,7 +954,7 @@ export function MazeGame({ level = ACTIVE_LEVEL, onReady, onSnapshot }: MazeGame
       if (!enemyFeatureEnabled || !enemyState || !runtimeLevel.enemy || completed || failed || enemyTween) return;
       const step = planEnemyStep(runtimeLevel, enemyState, now);
       if (!step) return;
-      const world = gridToWorld(runtimeLevel, step.destination);
+      const world = cellToWorld(runtimeLevel, step.destination, enemyBaseHeight);
 
       enemyTween = gsap.to(enemyRig.position, {
         x: world.x,
@@ -769,6 +1030,7 @@ export function MazeGame({ level = ACTIVE_LEVEL, onReady, onSnapshot }: MazeGame
       }
       if (
         destination.layer === runtimeLevel.finish.layer &&
+        destination.face === runtimeLevel.finish.face &&
         destination.x === runtimeLevel.finish.x &&
         destination.z === runtimeLevel.finish.z
       ) {
@@ -781,7 +1043,7 @@ export function MazeGame({ level = ACTIVE_LEVEL, onReady, onSnapshot }: MazeGame
     const animateRigTo = (segments: ReadonlyArray<TraversalSegment>, onComplete: () => void) => {
       const timeline = gsap.timeline({ onComplete });
       segments.forEach(({ target, duration, visualCell: segmentVisualCell }) => {
-        const world = gridToWorld(runtimeLevel, target);
+        const world = cellToWorld(runtimeLevel, target, playerBaseHeight);
         timeline.call(() => {
           visualCell = { ...(segmentVisualCell ?? target) };
           publish();
@@ -808,6 +1070,7 @@ export function MazeGame({ level = ACTIVE_LEVEL, onReady, onSnapshot }: MazeGame
       }
 
       playerCell = plan.destination;
+      topologyCue = getTopologyCueLabel(plan.destination.face, plan.seam);
       moves += 1;
       animateRigTo(plan.segments, () => finalizeMove(plan.destination));
       gsap.to(player.rotation, {
@@ -828,6 +1091,9 @@ export function MazeGame({ level = ACTIVE_LEVEL, onReady, onSnapshot }: MazeGame
       }
 
       playerCell = plan.destination;
+      topologyCue = plan.destination.face
+        ? `Tier change complete on ${CUBE_FACE_LABELS[plan.destination.face]}.`
+        : "Tier change complete.";
       moves += 1;
       animateRigTo(plan.segments, () => finalizeMove(plan.destination));
       gsap.to(player.scale, {
@@ -849,9 +1115,10 @@ export function MazeGame({ level = ACTIVE_LEVEL, onReady, onSnapshot }: MazeGame
       contacts = 0;
       playerCell = { ...runtimeLevel.start };
       visualCell = { ...runtimeLevel.start };
+      topologyCue = getTopologyCueLabel(runtimeLevel.start.face, null);
       playerTween?.kill();
       playerTween = null;
-      playerRig.position.copy(gridToWorld(runtimeLevel, playerCell));
+      setActorPosition(playerRig, playerCell, playerBaseHeight);
       gsap.set(player.rotation, { x: 0, y: 0, z: 0 });
       gsap.set(player.scale, { x: 1, y: 1, z: 1 });
       resetEnemy(startTime);
@@ -954,6 +1221,7 @@ export function MazeGame({ level = ACTIVE_LEVEL, onReady, onSnapshot }: MazeGame
     let perfHud: ReturnType<typeof attachPerfHud> | null = null;
     let perfHudFrames = 0;
     let syncedActiveLayer = -1;
+    let syncedActiveFace: CubeFace | undefined;
     if (perfEnabled) {
       perfHud = attachPerfHud(mount);
     }
@@ -971,30 +1239,36 @@ export function MazeGame({ level = ACTIVE_LEVEL, onReady, onSnapshot }: MazeGame
       updateEnemy(now);
       probe?.slice("enemyAi");
 
-      if (syncedActiveLayer !== visualCell.layer) {
+      if (syncedActiveLayer !== visualCell.layer || syncedActiveFace !== visualCell.face) {
         syncActiveLayerScene(visualCell.layer);
         syncedActiveLayer = visualCell.layer;
+        syncedActiveFace = visualCell.face;
       }
 
       const currentTile = describeCurrentTile(runtimeLevel, visualCell);
       const tileCue = getTileCuePalette(currentTile);
       const cuePulse = Math.sin(now * 0.007);
-      layerMaterials[visualCell.layer].deckFrame.opacity = 0.5 + cuePulse * 0.1;
+      if (runtimeLevel.topology === "cube" && visualCell.face) {
+        cubeFaceMaterials[visualCell.layer][visualCell.face].deckFrame.opacity = 0.56 + cuePulse * 0.1;
+      } else {
+        stackLayerMaterials[visualCell.layer]!.deckFrame.opacity = 0.5 + cuePulse * 0.1;
+      }
       playerCueMaterial.color.set(tileCue.ring);
       playerCueMaterial.opacity = tileCue.ringOpacity;
       playerCueFillMaterial.color.set(tileCue.fill);
       playerCueFillMaterial.opacity = tileCue.fillOpacity;
-      playerCueRing.position.set(playerRig.position.x, playerRig.position.y + 0.14, playerRig.position.z);
-      playerCueFill.position.set(playerRig.position.x, playerRig.position.y + 0.12, playerRig.position.z);
+      orientSurfaceMarker(playerCueRing, visualCell, 0.18 + (currentTile === "hole" ? 0.04 : 0));
+      orientSurfaceMarker(playerCueFill, visualCell, 0.16 + (currentTile === "hole" ? 0.03 : 0));
       const cueScale = currentTile === "hole" ? 1.06 + cuePulse * 0.04 : 1;
       playerCueRing.scale.setScalar(cueScale);
       playerCueFill.scale.setScalar(cueScale);
 
-      player.position.y = playerBaseHeight + Math.sin(now * 0.004) * 0.08;
+      setActorPosition(playerRig, visualCell, playerBaseHeight, Math.sin(now * 0.004) * 0.08);
       probe?.slice("playerBob");
 
       if (enemyFeatureEnabled && enemyState) {
         const threatPulse = (Math.sin(now * 0.008) + 1) / 2;
+        setActorPosition(enemyRig, enemyState.cell, enemyBaseHeight, Math.sin(now * 0.005 + 1.1) * 0.06);
         enemyBody.position.y = enemyBaseHeight + Math.sin(now * 0.005 + 1.1) * 0.06;
         enemyBody.rotation.z = Math.sin(now * 0.006) * 0.08;
         enemyBody.scale.setScalar(1 + threatPulse * 0.035);
@@ -1047,6 +1321,7 @@ export function MazeGame({ level = ACTIVE_LEVEL, onReady, onSnapshot }: MazeGame
     updateCamera(true);
     syncActiveLayerScene(visualCell.layer);
     syncedActiveLayer = visualCell.layer;
+    syncedActiveFace = visualCell.face;
     publish();
     animate();
 

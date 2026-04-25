@@ -72,7 +72,7 @@ export function planEnemyStep(level: RuntimeLevel, enemyState: EnemyRuntimeState
     level.enemy.path.length,
   );
   const destination = level.enemy.path[nextIndex];
-  if (!isWalkableTile(level, destination.x, destination.z, destination.layer)) {
+  if (!isWalkableTile(level, destination.x, destination.z, destination.layer, destination.face)) {
     throw new Error("Enemy patrol attempted to move into a blocked tile.");
   }
 
@@ -108,8 +108,9 @@ export function finalizeEnemyStep(
 
 export function hasEnemyContact(playerCell: LevelCoordinate, enemyState: EnemyRuntimeState | null): boolean {
   return Boolean(
-    enemyState &&
+      enemyState &&
       playerCell.layer === enemyState.cell.layer &&
+      playerCell.face === enemyState.cell.face &&
       playerCell.x === enemyState.cell.x &&
       playerCell.z === enemyState.cell.z,
   );

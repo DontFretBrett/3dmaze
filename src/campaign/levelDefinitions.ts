@@ -1,4 +1,12 @@
-import type { LayeredLevelDefinition, LegacyLevelDefinition, MazeLayer, Tile } from "../levelRuntime";
+import type {
+  CubeFace,
+  CubeLayerDefinition,
+  CubeLevelDefinition,
+  LayeredLevelDefinition,
+  LegacyLevelDefinition,
+  MazeLayer,
+  Tile,
+} from "../levelRuntime";
 
 type AuthoredRow = `${string}`;
 type TileGlyph = keyof typeof TILE_GLYPHS;
@@ -138,6 +146,48 @@ const FINAL_NEXUS_ROWS = [
   "#############",
 ] as const satisfies readonly AuthoredRow[];
 
+function parseCubeLayer(faces: Record<CubeFace, readonly AuthoredRow[]>): CubeLayerDefinition {
+  return {
+    north: parseLayer(faces.north),
+    east: parseLayer(faces.east),
+    south: parseLayer(faces.south),
+    west: parseLayer(faces.west),
+    top: parseLayer(faces.top),
+    bottom: parseLayer(faces.bottom),
+  };
+}
+
+const CUBE_FACE_RING = [
+  "###.###",
+  "#.....#",
+  "#.###.#",
+  ".......",
+  "#.###.#",
+  "#.....#",
+  "###.###",
+] as const satisfies readonly AuthoredRow[];
+
+const CUBE_FACE_SOLID = [
+  "#######",
+  "#######",
+  "#######",
+  "#######",
+  "#######",
+  "#######",
+  "#######",
+] as const satisfies readonly AuthoredRow[];
+
+function buildSideCubeLayer(overrides: Partial<Record<CubeFace, readonly AuthoredRow[]>> = {}) {
+  return parseCubeLayer({
+    north: overrides.north ?? CUBE_FACE_RING,
+    east: overrides.east ?? CUBE_FACE_RING,
+    south: overrides.south ?? CUBE_FACE_RING,
+    west: overrides.west ?? CUBE_FACE_RING,
+    top: overrides.top ?? CUBE_FACE_SOLID,
+    bottom: overrides.bottom ?? CUBE_FACE_SOLID,
+  });
+}
+
 export const LEVEL_1: LegacyLevelDefinition = {
   id: "level-1-neon-run",
   title: "Neon Run",
@@ -178,44 +228,26 @@ export const LEVEL_2: LegacyLevelDefinition = {
   finish: { x: 9, z: 9 },
 };
 
-export const LEVEL_3: LayeredLevelDefinition = {
+export const LEVEL_3: CubeLevelDefinition = {
   id: "level-3-vertical-drift",
   title: "Vertical Drift",
-  layers: [
-    parseLayer([
-      "###########",
-      "#...#L....#",
-      "#.#.#.###.#",
-      "#.#.#...#.#",
-      "#.#.###.#.#",
-      "#...#...#.#",
-      "###.#.###.#",
-      "#...#..L#.#",
-      "#.###.#.#.#",
-      "#.....#...#",
-      "###########",
-    ]),
-    parseLayer([
-      "###########",
-      "#.#.#L....#",
-      "#.#.#.###.#",
-      "#...#...#.#",
-      "###.###.#.#",
-      "#...#O..#.#",
-      "#.###.###.#",
-      "#.#.#..L#.#",
-      "#.#.###.#.#",
-      "#.....#...#",
-      "###########",
-    ]),
+  topology: "cube",
+  cubeLayers: [
+    buildSideCubeLayer({
+      east: setGlyph(CUBE_FACE_RING, 3, 3, "L"),
+    }),
+    buildSideCubeLayer({
+      east: setGlyph(CUBE_FACE_RING, 3, 3, "L"),
+      west: setGlyph(CUBE_FACE_RING, 1, 1, "O"),
+    }),
   ],
-  start: { x: 1, z: 1, layer: 0 },
-  finish: { x: 9, z: 9, layer: 1 },
+  start: { x: 1, z: 3, layer: 0, face: "north" },
+  finish: { x: 5, z: 3, layer: 1, face: "south" },
   enemy: {
     path: [
-      { x: 5, z: 7, layer: 1 },
-      { x: 6, z: 7, layer: 1 },
-      { x: 7, z: 7, layer: 1 },
+      { x: 2, z: 1, layer: 1, face: "west" },
+      { x: 3, z: 1, layer: 1, face: "west" },
+      { x: 4, z: 1, layer: 1, face: "west" },
     ],
     secondsPerCell: 1.08,
     initialDelayMs: 850,
@@ -223,65 +255,32 @@ export const LEVEL_3: LayeredLevelDefinition = {
   },
 };
 
-export const LEVEL_4: LayeredLevelDefinition = {
+export const LEVEL_4: CubeLevelDefinition = {
   id: "level-4-lockdown-labyrinth",
   title: "Prism Spire",
-  layers: [
-    parseLayer([
-      "#############",
-      "#....L......#",
-      "#.###.#####.#",
-      "#.#.......#.#",
-      "#.#.#####.#.#",
-      "#.#.#...#.#.#",
-      "#...#.#.#...#",
-      "#####.#.###.#",
-      "#.....#.....#",
-      "#.#####.###.#",
-      "#.#.....#...#",
-      "#....L..#...#",
-      "#############",
-    ]),
-    parseLayer([
-      "#############",
-      "#....L..#...#",
-      "#.###.#.#.#.#",
-      "#...#.#...#.#",
-      "###.#.#####.#",
-      "#...#O..#.#.#",
-      "#.#####.#.###",
-      "#...#...#...#",
-      "###.#.###.#.#",
-      "#...#.....#.#",
-      "#.###.#####.#",
-      "#....L......#",
-      "#############",
-    ]),
-    parseLayer([
-      "#############",
-      "#....L......#",
-      "#.#####.###.#",
-      "#.....#...#.#",
-      "#.###.###.#.#",
-      "#...#...#...#",
-      "###.#.#.###.#",
-      "#...#.#.....#",
-      "#.###.#####.#",
-      "#.#...#...#.#",
-      "#.#.###.#.#.#",
-      "#....L..#...#",
-      "#############",
-    ]),
+  topology: "cube",
+  cubeLayers: [
+    buildSideCubeLayer({
+      east: setGlyph(CUBE_FACE_RING, 3, 3, "L"),
+    }),
+    buildSideCubeLayer({
+      east: setGlyph(CUBE_FACE_RING, 3, 3, "L"),
+      west: setGlyph(CUBE_FACE_RING, 3, 3, "L"),
+      north: setGlyph(CUBE_FACE_RING, 5, 1, "O"),
+    }),
+    buildSideCubeLayer({
+      west: setGlyph(CUBE_FACE_RING, 3, 3, "L"),
+      south: setGlyph(CUBE_FACE_RING, 1, 5, "O"),
+    }),
   ],
-  start: { x: 1, z: 1, layer: 0 },
-  finish: { x: 11, z: 11, layer: 2 },
+  start: { x: 2, z: 3, layer: 0, face: "east" },
+  finish: { x: 5, z: 3, layer: 2, face: "south" },
   enemy: {
     path: [
-      { x: 7, z: 7, layer: 2 },
-      { x: 8, z: 7, layer: 2 },
-      { x: 9, z: 7, layer: 2 },
-      { x: 10, z: 7, layer: 2 },
-      { x: 11, z: 7, layer: 2 },
+      { x: 2, z: 5, layer: 2, face: "east" },
+      { x: 3, z: 5, layer: 2, face: "east" },
+      { x: 4, z: 5, layer: 2, face: "east" },
+      { x: 5, z: 5, layer: 2, face: "east" },
     ],
     secondsPerCell: 1.04,
     initialDelayMs: 700,

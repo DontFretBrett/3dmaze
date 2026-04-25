@@ -1,11 +1,13 @@
 import {
   createRuntimeLevel,
+  forEachCoordinate,
   getTileAt,
-  isWalkableTile,
   resolveHoleLanding,
+  sameCoordinate,
   type LevelCoordinate,
   type RuntimeLevel,
 } from "../levelRuntime";
+import { resolveHorizontalTraversal } from "../verticalTraversal";
 import { CAMPAIGN_LEVEL_DEFINITIONS } from "./levelDefinitions";
 
 export type TraversalEdgeType = "walk" | "ladder" | "hole";
@@ -49,12 +51,10 @@ interface ShortestPathResult {
 }
 
 export function keyOf(cell: LevelCoordinate) {
-  return `${cell.layer}:${cell.x}:${cell.z}`;
+  return `${cell.layer}:${cell.face ?? "stack"}:${cell.x}:${cell.z}`;
 }
 
-export function sameCoordinate(left: LevelCoordinate, right: LevelCoordinate) {
-  return left.x === right.x && left.z === right.z && left.layer === right.layer;
-}
+export { sameCoordinate } from "../levelRuntime";
 
 function resolveEntry(level: RuntimeLevel, cell: LevelCoordinate) {
   const landing = resolveHoleLanding(level, cell);
@@ -73,19 +73,26 @@ export function getTraversalNeighbors(level: RuntimeLevel, cell: LevelCoordinate
     [0, 1],
     [0, -1],
   ] as const) {
-    const entered = { x: cell.x + dx, z: cell.z + dz, layer: cell.layer } satisfies LevelCoordinate;
-    if (!isWalkableTile(level, entered.x, entered.z, entered.layer)) continue;
+    const plan = resolveHorizontalTraversal(level, cell, dx, dz, 1);
+    if (!plan) continue;
+    const entered = plan.segments[0]?.target;
+    if (!entered) continue;
 
     neighbors.push({
       cell: resolveEntry(level, entered),
-      type: getTileAt(level, entered.x, entered.z, entered.layer) === "hole" ? "hole" : "walk",
+      type: getTileAt(level, entered.x, entered.z, entered.layer, entered.face) === "hole" ? "hole" : "walk",
     });
   }
 
-  if (getTileAt(level, cell.x, cell.z, cell.layer) === "ladder") {
+  if (getTileAt(level, cell.x, cell.z, cell.layer, cell.face) === "ladder") {
     for (const delta of [-1, 1] as const) {
-      const climbed = { x: cell.x, z: cell.z, layer: cell.layer + delta } satisfies LevelCoordinate;
-      if (getTileAt(level, climbed.x, climbed.z, climbed.layer) === "ladder") {
+      const climbed = {
+        x: cell.x,
+        z: cell.z,
+        layer: cell.layer + delta,
+        ...(cell.face ? { face: cell.face } : {}),
+      } satisfies LevelCoordinate;
+      if (getTileAt(level, climbed.x, climbed.z, climbed.layer, climbed.face) === "ladder") {
         neighbors.push({ cell: climbed, type: "ladder" });
       }
     }
@@ -186,8 +193,13 @@ function countBranching(level: RuntimeLevel, reachable: ReadonlySet<string>) {
   let branchSurplus = 0;
 
   reachable.forEach((cellKey) => {
-    const [layer, x, z] = cellKey.split(":").map(Number);
-    const degree = getTraversalNeighbors(level, { x, z, layer }).filter((neighbor) =>
+    const [layerToken, faceToken, xToken, zToken] = cellKey.split(":");
+    const degree = getTraversalNeighbors(level, {
+      x: Number(xToken),
+      z: Number(zToken),
+      layer: Number(layerToken),
+      ...(faceToken !== "stack" ? { face: faceToken as LevelCoordinate["face"] } : {}),
+    }).filter((neighbor) =>
       reachable.has(keyOf(neighbor.cell)),
     ).length;
 
@@ -203,50 +215,47 @@ function countBranching(level: RuntimeLevel, reachable: ReadonlySet<string>) {
 
 function getTraversalPoints(level: RuntimeLevel, reachableFromStart: ReadonlySet<string>): TraversalPointAssessment[] {
   const points: TraversalPointAssessment[] = [];
+  forEachCoordinate(level, (coordinate) => {
+    const tile = getTileAt(level, coordinate.x, coordinate.z, coordinate.layer, coordinate.face);
+    if (tile !== "ladder" && tile !== "hole") return;
 
-  for (let layer = 0; layer < level.layerCount; layer += 1) {
-    for (let z = 0; z < level.depth; z += 1) {
-      for (let x = 0; x < level.width; x += 1) {
-        const tile = getTileAt(level, x, z, layer);
-        if (tile !== "ladder" && tile !== "hole") continue;
-
-        const coordinate = { x, z, layer } satisfies LevelCoordinate;
-        if (tile === "ladder") {
-          const reachable = reachableFromStart.has(keyOf(coordinate));
-          points.push({
-            type: "ladder",
-            coordinate,
-            entryCount: reachable ? 1 : 0,
-            reachableFromStart: reachable,
-            canReachFinish: reachable && getReachableCells(level, coordinate).has(keyOf(level.finish)),
-            landing: coordinate,
-          });
-          continue;
-        }
-
-        const landing = resolveHoleLanding(level, coordinate);
-        const entryCount = [
-          [1, 0],
-          [-1, 0],
-          [0, 1],
-          [0, -1],
-        ].reduce((count, [dx, dz]) => {
-          const adjacent = { x: x + dx, z: z + dz, layer } satisfies LevelCoordinate;
-          if (!reachableFromStart.has(keyOf(adjacent))) return count;
-          return isWalkableTile(level, adjacent.x, adjacent.z, adjacent.layer) ? count + 1 : count;
-        }, 0);
-
-        points.push({
-          type: "hole",
-          coordinate,
-          entryCount,
-          reachableFromStart: entryCount > 0,
-          canReachFinish: landing !== null && getReachableCells(level, landing).has(keyOf(level.finish)),
-          landing,
-        });
-      }
+    if (tile === "ladder") {
+      const reachable = reachableFromStart.has(keyOf(coordinate));
+      points.push({
+        type: "ladder",
+        coordinate,
+        entryCount: reachable ? 1 : 0,
+        reachableFromStart: reachable,
+        canReachFinish: reachable && getReachableCells(level, coordinate).has(keyOf(level.finish)),
+        landing: coordinate,
+      });
+      return;
     }
-  }
+
+    const landing = resolveHoleLanding(level, coordinate);
+    const entryCount = [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+    ].reduce((count, [dx, dz]) => {
+      const plan = resolveHorizontalTraversal(level, coordinate, dx, dz, 1);
+      if (!plan) return count;
+
+      const adjacent = plan.destination;
+      if (!reachableFromStart.has(keyOf(adjacent))) return count;
+      return count + 1;
+    }, 0);
+
+    points.push({
+      type: "hole",
+      coordinate,
+      entryCount,
+      reachableFromStart: entryCount > 0,
+      canReachFinish: landing !== null && getReachableCells(level, landing).has(keyOf(level.finish)),
+      landing,
+    });
+  });
 
   return points;
 }
