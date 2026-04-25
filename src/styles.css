@@ -675,12 +675,56 @@ h1 {
     grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
   }
 
+  /* Compact, thumb-friendly level strip (scroll when all 10 do not fit). */
   .level-select {
-    display: none;
+    flex-wrap: nowrap;
+    gap: 0.35rem;
+    margin-top: 0.4rem;
+    margin-right: -0.15rem;
+    padding: 0.15rem 0.15rem 0.35rem;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x proximity;
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
+  }
+
+  .level-select::-webkit-scrollbar {
+    height: 4px;
+  }
+
+  .level-select::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    background: rgba(182, 255, 241, 0.28);
+  }
+
+  .level-select .level-chip {
+    flex: 0 0 auto;
+    scroll-snap-align: start;
+    min-width: 5.25rem;
+    min-height: 2.75rem;
+    padding: 0.35rem 0.55rem;
+  }
+
+  .level-select .level-chip strong {
+    font-size: 0.72rem;
+    line-height: 1.15;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
   }
 
   .brand .hud-level {
-    display: none;
+    display: block;
+    margin-top: 0.2rem;
+    margin-bottom: 0;
+    max-width: 100%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 0.7rem;
   }
 
   .brand-mark {

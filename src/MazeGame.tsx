@@ -978,7 +978,10 @@ export function MazeGame({ level = ACTIVE_LEVEL, onReady, onSnapshot }: MazeGame
       });
     };
 
-    const updateCamera = (instant = false) => {
+    /** Per-second smoothing; frame-rate independent when `dtSeconds` is passed from the render loop. */
+    const cameraFollowRate = 11;
+
+    const updateCamera = (instant = false, dtSeconds?: number) => {
       cameraTarget.set(playerRig.position.x, playerRig.position.y + cameraTargetHeight, playerRig.position.z);
       const flatDistance = Math.cos(cameraPitch) * cameraDistance;
       cameraOffset.set(
@@ -991,7 +994,9 @@ export function MazeGame({ level = ACTIVE_LEVEL, onReady, onSnapshot }: MazeGame
       if (instant) {
         camera.position.copy(desiredCameraPosition);
       } else {
-        camera.position.lerp(desiredCameraPosition, 0.14);
+        const dt = dtSeconds ?? 1 / 60;
+        const alpha = 1 - Math.exp(-cameraFollowRate * Math.min(dt, 0.05));
+        camera.position.lerp(desiredCameraPosition, alpha);
       }
 
       camera.lookAt(cameraTarget);
@@ -1222,6 +1227,7 @@ export function MazeGame({ level = ACTIVE_LEVEL, onReady, onSnapshot }: MazeGame
     let perfHudFrames = 0;
     let syncedActiveLayer = -1;
     let syncedActiveFace: CubeFace | undefined;
+    let lastFrameTime = performance.now();
     if (perfEnabled) {
       perfHud = attachPerfHud(mount);
     }
@@ -1231,6 +1237,8 @@ export function MazeGame({ level = ACTIVE_LEVEL, onReady, onSnapshot }: MazeGame
       probe?.start();
 
       const now = performance.now();
+      const dtSeconds = Math.min((now - lastFrameTime) / 1000, 0.05);
+      lastFrameTime = now;
       if (!completed && !failed) {
         currentTime = (now - startTime) / 1000;
       }
@@ -1263,7 +1271,10 @@ export function MazeGame({ level = ACTIVE_LEVEL, onReady, onSnapshot }: MazeGame
       playerCueRing.scale.setScalar(cueScale);
       playerCueFill.scale.setScalar(cueScale);
 
-      setActorPosition(playerRig, visualCell, playerBaseHeight, Math.sin(now * 0.004) * 0.08);
+      // While GSAP tweens `playerRig.position`, do not overwrite it each frame (that caused jitter).
+      if (!playerTween) {
+        setActorPosition(playerRig, visualCell, playerBaseHeight, Math.sin(now * 0.004) * 0.08);
+      }
       probe?.slice("playerBob");
 
       if (enemyFeatureEnabled && enemyState) {
@@ -1284,7 +1295,7 @@ export function MazeGame({ level = ACTIVE_LEVEL, onReady, onSnapshot }: MazeGame
       particles.rotation.y += 0.0008;
       probe?.slice("fx");
 
-      updateCamera();
+      updateCamera(false, dtSeconds);
       probe?.slice("camera");
 
       renderer.render(scene, camera);
