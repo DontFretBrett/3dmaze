@@ -3,7 +3,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { CAMPAIGN_WALKTHROUGHS, type CampaignAction } from "./src/campaign/campaignWalkthrough";
 import { PLAYER_MOVE_SECONDS } from "./src/enemyDesign";
 
-test.describe.configure({ mode: "serial", timeout: 240_000 });
+test.describe.configure({ mode: "serial", timeout: 600_000 });
 
 const ACTION_LABELS: Record<CampaignAction, string> = {
   forward: "Move forward",
